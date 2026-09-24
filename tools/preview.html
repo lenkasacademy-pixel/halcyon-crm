@@ -97,7 +97,7 @@ var STUB = function () {
   function card(l){
     return { id:l.id, name:l.name, phone:l.phone, source:l.source, stage:l.stage, owner:l.owner,
              remarks:l.remarks, time:l.time, timeIso:l.timeIso, nextAt:l.nextAt, nextIso:l.nextIso,
-             nextNote:l.nextNote, lastActivity:l.lastActivity };
+             nextNote:l.nextNote, lastActivity:l.lastActivity, events:l.eventsSent };
   }
   function log(id, type, detail){
     (acts[id] = acts[id] || []).unshift({ time: fmt(new Date()), type:type, by:'Pallavi', detail:detail });

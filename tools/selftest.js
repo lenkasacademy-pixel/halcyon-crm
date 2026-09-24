@@ -231,6 +231,19 @@ group('what each user can see');
   ok("cannot open someone else's lead", G.lead(caller, 'L002').ok === false);
 }
 
+group('the dashboard payload');
+{
+  const { G } = load({});
+  const t = G.login('482913').token;
+  const b = G.bootstrap(t);
+  const l2 = b.leads.filter(l => l.id === 'L002')[0];
+  ok('cards carry the events ledger', Array.isArray(l2.events), l2.events);
+  eq('parsed, not raw', l2.events.join(','), 'HAttempted,HContacted,HQualified');
+  eq('a lead with none gets an empty list',
+     b.leads.filter(l => l.id === 'L001')[0].events.length, 0);
+  ok('and the arrival time is machine readable', /^\d{4}-/.test(b.leads[0].timeIso), b.leads[0].timeIso);
+}
+
 group('notes');
 {
   const { G, book } = load({});

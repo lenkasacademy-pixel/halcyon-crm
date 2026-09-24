@@ -292,7 +292,10 @@ function card_(l) {
     owner: l.owner, remarks: l.remarks,
     time: fmt_(l.time), timeIso: iso_(l.time),
     nextAt: fmt_(l.nextAt), nextIso: iso_(l.nextAt), nextNote: l.nextNote,
-    lastActivity: fmt_(l.lastActivity)
+    lastActivity: fmt_(l.lastActivity),
+    /* the ledger, so the dashboard can count what actually reached Meta
+       without a second pass over the sheet */
+    events: l.events.split('|').filter(Boolean)
   };
 }
 

@@ -18,6 +18,19 @@ It opens the same spreadsheet by id, as a *separate* standalone script. The
 existing container-bound script — intake, Telegram, its own `onEdit` — is not
 modified and keeps running exactly as it does now.
 
+## The two screens
+
+**Dashboard** — how the clinic is doing, over 7, 30 or 90 days: new today and
+how many are still uncalled, what is due now, what is overdue, how many booked
+or converted and the rate; where the leads came from by source; how many Meta
+events actually went out; and the pipeline, every stage with a bar.
+
+**Leads** — the table you live in: name with how long ago it arrived, one-tap
+call and WhatsApp, source, owner, the stage as a dropdown you can change
+straight from the row, and the next follow-up coloured by how late it is.
+Search, filter by source and owner, sort, and the quick counts — To call, New,
+Today, Working, All. It becomes cards on a phone.
+
 ## What a caller sees
 
 - **To call** — everything whose follow-up time has passed, oldest first. This is
