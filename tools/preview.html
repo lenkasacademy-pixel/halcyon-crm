@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Halcyon CRM — preview</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d1b24}
+  iframe{border:0;width:100%;height:100%;display:block}
+  #note{position:fixed;left:10px;bottom:10px;z-index:9;font:12px/1.4 -apple-system,sans-serif;
+    color:#8fb0c0;background:rgba(19,39,53,.92);border:1px solid #24455a;border-radius:8px;padding:7px 11px}
+</style>
+</head>
+<body>
+<!--
+  Opens src/App.html with a fake server, so the screens can be worked on
+  without deploying to Apps Script. Nothing here ships: Code.gs is the real
+  backend and tools/selftest.js is what actually tests it.
+
+      python3 -m http.server 8080      then open /tools/preview.html
+      (it fetches ../src/App.html, so it needs a server, not file://)
+
+  Any PIN signs in.
+-->
+<div id="note">preview &middot; fake data &middot; any PIN works</div>
+<script>
+/* ------------------------------------------------------------------ *
+ * The fake server. Shapes match what Code.gs returns, so the UI cannot
+ * be built against something the backend does not send.
+ * ------------------------------------------------------------------ */
+var STUB = function () {
+  var STAGES = [
+    { key:'new', label:'New', event:null, tone:'grey' },
+    { key:'attempted', label:'Attempted', event:'HAttempted', tone:'amber' },
+    { key:'contacted', label:'Contacted', event:'HContacted', tone:'blue' },
+    { key:'qualified', label:'Qualified', event:'HQualified', tone:'violet' },
+    { key:'booked', label:'Booked', event:'HBooked', tone:'teal' },
+    { key:'converted', label:'Converted', event:'HConverted', tone:'green' },
+    { key:'notq', label:'Not qualified', event:'HNotQualified', tone:'grey' },
+    { key:'junk', label:'Junk', event:'HJunk', tone:'red' },
+    { key:'lost', label:'Lost', event:'HLost', tone:'red' }
+  ];
+  var OUTCOMES = [
+    { key:'answered', label:'Answered', stage:'contacted' },
+    { key:'noanswer', label:'No answer', stage:'attempted' },
+    { key:'busy', label:'Busy / cut', stage:'attempted' },
+    { key:'switched', label:'Switched off', stage:'attempted' },
+    { key:'wrong', label:'Wrong number', stage:'junk' },
+    { key:'callback', label:'Asked to call later', stage:'contacted' }
+  ];
+  var NAMES = ['Ramesh Kumar','Lakshmi Devi','Srinivas Rao','Anita Sharma','Venkat Reddy',
+    'Padma Priya','Mohan Babu','Sunitha N','Kiran Kumar','Rajeshwari','Naveen Chandra',
+    'Sridevi M','Prakash Rao','Geetha Rani'];
+  var STG = ['New','New','Contacted','Attempted','Qualified','New','Booked','Contacted',
+    'New','Lost','Qualified','Attempted','Converted','New'];
+  var SRC = ['7788','8585','7788','7788','8585','7788','8585','7788','7788','8585','7788','8585','7788','7788'];
+  var MIN = 60000, HR = 3600000, DAY = 86400000;
+
+  function fmt(d){
+    var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var p = function(n){ return (n < 10 ? '0' : '') + n; };
+    return p(d.getDate()) + ' ' + M[d.getMonth()] + ', ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  var leads = NAMES.map(function (n, i) {
+    var t = new Date(Date.now() - (i * 7 + 1) * HR);
+    /* a handful due now, a couple overdue, one later today */
+    var next = null;
+    if (i === 2) next = new Date(Date.now() - 2 * DAY);
+    else if (i === 3) next = new Date(Date.now() - 40 * MIN);
+    else if (i === 7) next = new Date(Date.now() - 5 * MIN);
+    else if (i === 11) next = new Date(Date.now() + 3 * HR);
+    return {
+      id: 'L' + (101 + i),
+      name: n,
+      phone: '9' + String(100000000 + i * 7654321).slice(0, 9),
+      source: SRC[i],
+      stage: STG[i],
+      owner: i % 3 === 0 ? 'Pallavi' : (i % 3 === 1 ? 'Caller A' : ''),
+      remarks: i % 4 === 0 ? 'Knee pain both sides, 6 months' : '',
+      time: fmt(t), timeIso: t.toISOString(),
+      nextAt: next ? fmt(next) : '', nextIso: next ? next.toISOString() : '', nextNote: next ? 'call back' : '',
+      lastActivity: '',
+      pageUrl: 'https://halcyonpainfree.com/' + (i % 2 ? 'knee-pain-treatment/' : 'sciatica/'),
+      referrer: '', attributed: i % 3 !== 2,
+      eventsSent: STG[i] === 'New' ? [] : ['HAttempted','HContacted'].slice(0, i % 2 + 1),
+      lastResult: ''
+    };
+  });
+  var acts = {};
+  acts['L103'] = [
+    { time: fmt(new Date(Date.now() - 2 * DAY)), type:'call', by:'Caller A', detail:'Answered — asked for Saturday morning' },
+    { time: fmt(new Date(Date.now() - 2 * DAY)), type:'note', by:'Caller A', detail:'Knee pain both sides, 6 months, has an MRI' },
+    { time: fmt(new Date(Date.now() - 2 * DAY)), type:'meta', by:'system', detail:'HContacted → sent' }
+  ];
+
+  function byId(id){ for (var i = 0; i < leads.length; i++) if (leads[i].id === id) return leads[i]; return null; }
+  function card(l){
+    return { id:l.id, name:l.name, phone:l.phone, source:l.source, stage:l.stage, owner:l.owner,
+             remarks:l.remarks, time:l.time, timeIso:l.timeIso, nextAt:l.nextAt, nextIso:l.nextIso,
+             nextNote:l.nextNote, lastActivity:l.lastActivity };
+  }
+  function log(id, type, detail){
+    (acts[id] = acts[id] || []).unshift({ time: fmt(new Date()), type:type, by:'Pallavi', detail:detail });
+  }
+
+  var API = {
+    login: function (pin) {
+      if (!pin) return { ok:false, error:'Enter your PIN' };
+      return { ok:true, token:'preview', user:{ name:'Pallavi', role:'admin', sources:'all' } };
+    },
+    logout: function () { return { ok:true }; },
+    bootstrap: function () {
+      var now = Date.now(), c = { total:leads.length, due:0, overdue:0, today:0, untouched:0 };
+      leads.forEach(function (l) {
+        if (l.nextIso) { var t = new Date(l.nextIso).getTime();
+          if (t <= now) c.due++; if (t <= now - 86400000) c.overdue++; }
+        if (l.timeIso && now - new Date(l.timeIso).getTime() < 86400000) c.today++;
+        if (l.stage.toLowerCase() === 'new') c.untouched++;
+      });
+      return { ok:true, user:{ name:'Pallavi', role:'admin', sources:'all' }, version:'preview',
+               stages:STAGES, outcomes:OUTCOMES, whatsapp:'917788091092', counts:c, byStage:{},
+               sources:['7788','8585'], leads:leads.map(card) };
+    },
+    lead: function (t, id) {
+      var l = byId(id);
+      return l ? { ok:true, lead:l, activity:acts[id] || [] } : { ok:false, error:'Lead not found' };
+    },
+    note: function (t, id, text) { log(id, 'note', text); byId(id).remarks = text; return { ok:true, activity:acts[id] }; },
+    logCall: function (t, id, key, text) {
+      var o = OUTCOMES.filter(function (x) { return x.key === key; })[0];
+      if (!o) return { ok:false, error:'Unknown outcome' };
+      log(id, 'call', o.label + (text ? ' — ' + text : ''));
+      var l = byId(id), order = STAGES.map(function (s) { return s.key; });
+      var cur = STAGES.filter(function (s) { return s.label.toLowerCase() === l.stage.toLowerCase(); })[0];
+      var want = STAGES.filter(function (s) { return s.key === o.stage; })[0];
+      if (want && (!cur || order.indexOf(want.key) > order.indexOf(cur.key) || want.key === 'junk')) l.stage = want.label;
+      return { ok:true, stage:l.stage, activity:acts[id] };
+    },
+    setStage: function (t, id, label) {
+      var l = byId(id); l.stage = label;
+      var st = STAGES.filter(function (s) { return s.label === label; })[0];
+      if (st && st.event) { log(id, 'meta', st.event + ' → sent'); l.eventsSent = l.eventsSent.concat([st.event]); }
+      log(id, 'stage', label);
+      return { ok:true, stage:label, meta: st && st.event ? { ok:true, received:1 } : { skipped:'no event' }, activity:acts[id] };
+    },
+    setFollowUp: function (t, id, iso, text) {
+      var l = byId(id);
+      if (!iso) { l.nextAt = ''; l.nextIso = ''; l.nextNote = ''; log(id,'followup','Follow-up cleared');
+                  return { ok:true, nextAt:'', nextNote:'' }; }
+      var d = new Date(iso); l.nextIso = iso; l.nextAt = fmt(d); l.nextNote = text || '';
+      log(id, 'followup', 'Call back ' + l.nextAt + (text ? ' — ' + text : ''));
+      return { ok:true, nextAt:l.nextAt, nextIso:iso, nextNote:text || '' };
+    },
+    assign: function (t, id, who) { byId(id).owner = who; log(id,'owner','Owner: ' + who); return { ok:true, owner:who }; }
+  };
+
+  /* the shape google.script.run has: chainable handlers, then the call */
+  function runner(){
+    var ok = null, bad = null;
+    var self = {
+      withSuccessHandler: function (f) { ok = f; return self; },
+      withFailureHandler: function (f) { bad = f; return self; }
+    };
+    Object.keys(API).forEach(function (name) {
+      self[name] = function () {
+        var args = [].slice.call(arguments);
+        setTimeout(function () {
+          try { ok && ok(API[name].apply(null, args)); }
+          catch (e) { bad ? bad(e) : console.error(e); }
+        }, 90);                       /* a touch of latency, like the real thing */
+      };
+    });
+    return self;
+  }
+  window.google = { script: { run: (function () {
+    var base = runner();
+    return new Proxy(base, { get: function (t, k) { return runner()[k]; } });
+  })() } };
+};
+
+fetch('../src/App.html')
+  .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+  .then(function (html) {
+    var stub = '<scr' + 'ipt>(' + STUB.toString() + ')();</scr' + 'ipt>';
+    var f = document.createElement('iframe');
+    /* Anchored on </head>, not on the body tag: a stylesheet comment can
+       contain the text "<body>" and this would inject into the middle of it,
+       where the browser treats it as CSS and the stub never runs. The parser
+       moves a script placed here into the document before any body content,
+       so it is still in place before the app's own script. */
+    f.srcdoc = html.replace('</head>', '</head>' + stub);
+    document.body.appendChild(f);
+  })
+  .catch(function (e) {
+    document.body.insertAdjacentHTML('beforeend',
+      '<p style="color:#e05c5c;font:14px sans-serif;padding:20px">Could not load ../src/App.html (' + e.message +
+      '). Serve the repo over http — python3 -m http.server — rather than opening this file directly.</p>');
+  });
+</script>
+</body>
+</html>

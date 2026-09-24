@@ -13,7 +13,7 @@
   --bg:#0d1b24; --panel:#132735; --panel2:#18303f; --line:#24455a;
   --ink:#eaf4f8; --dim:#8fb0c0; --accent:#2bb3a3; --accent2:#1d8f82;
   --amber:#e0a33c; --red:#e05c5c; --green:#3fb370; --violet:#8d7ae8; --blue:#4aa3e0;
-  --r:14px; --tap:44px;
+  --r:14px; --tap:44px; --sideW:min(460px,40vw);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%}
@@ -35,7 +35,8 @@ a{color:var(--accent)}
 .pin{width:100%;height:52px;text-align:center;font-size:26px;letter-spacing:10px;
   background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:0 0 0 10px}
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:var(--tap);
-  border-radius:10px;background:var(--accent);color:#04201c;font-weight:650;padding:0 18px;width:100%}
+  border-radius:10px;background:var(--accent);color:#04201c;font-weight:650;padding:0 18px;width:100%;
+  text-decoration:none}                       /* Call and WhatsApp are links */
 .btn:active{background:var(--accent2)}
 .btn.ghost{background:var(--panel2);color:var(--ink);border:1px solid var(--line);font-weight:550}
 .btn.sm{min-height:36px;padding:0 12px;font-size:13px;width:auto}
@@ -96,6 +97,28 @@ main{padding:12px 14px 90px;max-width:760px;margin:0 auto}
   #sheet{align-items:center}
   .panel{border-radius:var(--r);max-height:88dvh}
 }
+/* On a desk the cockpit docks to the right and the queue stays on screen, so
+   a caller works down the list without it vanishing behind an overlay. The
+   page is inset by the panel's width rather than covered by it. */
+/* The inset goes on the shell, not on the body element: the browser zeroes
+   padding on the viewport-propagating body, so it silently does nothing there. */
+#app{padding-right:var(--dock,0px);transition:padding-right .22s ease}
+@media(min-width:1024px){
+  html.docked{--dock:var(--sideW)}
+  #sheet:not(.hide){background:none;inset:0 0 0 auto;width:var(--sideW);display:block}
+  #sheet:not(.hide) .panel{width:100%;max-width:none;height:100dvh;max-height:none;
+    border-radius:0;border-width:0 0 0 1px;animation:slidein .2s ease-out}
+}
+@keyframes slidein{from{transform:translateX(18px);opacity:.4}to{transform:none;opacity:1}}
+/* which row the open lead is */
+.lead.is-on{border-color:var(--accent);background:var(--panel2);
+  box-shadow:inset 3px 0 0 var(--accent)}
+/* step through the queue without going back to the list */
+.pnav{display:flex;gap:4px}
+.pnav button{width:30px;height:30px;border-radius:8px;background:var(--panel2);
+  border:1px solid var(--line);color:var(--dim);display:grid;place-items:center;font-size:14px}
+.pnav button:disabled{opacity:.3}
+.pos{font-size:11.5px;color:var(--dim);align-self:center;padding:0 4px;white-space:nowrap}
 .phead{padding:16px 16px 12px;border-bottom:1px solid var(--line)}
 .phead .row{display:flex;align-items:flex-start;gap:10px}
 .phead h2{margin:0;font-size:19px;line-height:1.25}
@@ -196,6 +219,11 @@ main{padding:12px 14px 90px;max-width:760px;margin:0 auto}
           <h2 id="cName">—</h2>
           <div class="sub" id="cSub"></div>
         </div>
+        <div class="pnav">
+          <button id="cPrev" onclick="step(-1)" aria-label="Previous lead" title="Previous (k)">&#8593;</button>
+          <button id="cNext" onclick="step(1)" aria-label="Next lead" title="Next (j)">&#8595;</button>
+        </div>
+        <span class="pos" id="cPos"></span>
         <button class="icon" onclick="closeLead()" aria-label="Close">&times;</button>
       </div>
       <div class="acts">
@@ -238,7 +266,8 @@ function call(fn, args){
   });
 }
 var S = { token:'', user:null, leads:[], stages:[], outcomes:[], counts:{}, whatsapp:'',
-          tab:'queue', lead:null, activity:[], modal:null, pick:null };
+          tab:'queue', lead:null, activity:[], modal:null, pick:null,
+          view:[] };        /* ids in the order the queue currently shows them */
 
 function toast(msg, bad){
   var t = document.getElementById('toast');
@@ -340,6 +369,8 @@ function tone(stage){
 }
 function draw(){
   var rows = filtered(), now = Date.now();
+  S.view = rows.map(function(l){ return l.id; });
+  var openId = S.lead && S.lead.id;
   document.getElementById('list').innerHTML = rows.length ? rows.map(function(l){
     var due = '';
     if (l.nextIso){
@@ -347,7 +378,8 @@ function draw(){
       var cls = t <= now - 864e5 ? 'late' : (t <= now ? 'now' : '');
       due = '<span class="due ' + cls + '">&#9200; ' + esc(l.nextAt) + '</span>';
     }
-    return '<article class="lead" onclick="openLead(\'' + esc(l.id) + '\')">' +
+    return '<article class="lead' + (l.id === openId ? ' is-on' : '') +
+      '" onclick="openLead(\'' + esc(l.id) + '\')">' +
       '<div class="nm">' + esc(l.name || 'No name') + '</div>' +
       '<div class="ph">' + esc(l.phone) + '</div>' +
       '<div class="meta">' +
@@ -358,11 +390,33 @@ function draw(){
       '</div></article>';
   }).join('') : '<p class="empty">Nothing here.' +
       (S.tab === 'queue' ? '<br>No follow-up is due right now.' : '') + '</p>';
+  paintNav();
+}
+
+/* where in the queue the open lead sits, and whether stepping is possible */
+function paintNav(){
+  var pos = document.getElementById('cPos'), prev = document.getElementById('cPrev'),
+      next = document.getElementById('cNext');
+  if (!pos) return;
+  var i = S.lead ? S.view.indexOf(S.lead.id) : -1;
+  pos.textContent = i < 0 ? '' : (i + 1) + ' / ' + S.view.length;
+  prev.disabled = i <= 0;
+  next.disabled = i < 0 || i >= S.view.length - 1;
+}
+
+/* move to the lead before or after this one, without going back to the list */
+function step(n){
+  var i = S.lead ? S.view.indexOf(S.lead.id) : -1;
+  if (i < 0) return;
+  var j = i + n;
+  if (j < 0 || j >= S.view.length) return;
+  openLead(S.view[j]);
 }
 
 /* ---------------- cockpit ---------------- */
 function openLead(id){
   document.getElementById('sheet').classList.remove('hide');
+  document.documentElement.classList.add('docked');
   document.getElementById('cName').textContent = 'Loading…';
   document.getElementById('cSub').textContent = '';
   document.getElementById('cFacts').innerHTML = '';
@@ -372,7 +426,12 @@ function openLead(id){
     paintLead();
   }).catch(function(e){ toast(String(e.message || e), true); });
 }
-function closeLead(){ document.getElementById('sheet').classList.add('hide'); S.lead = null; }
+function closeLead(){
+  document.getElementById('sheet').classList.add('hide');
+  document.documentElement.classList.remove('docked');
+  S.lead = null;
+  draw();                                   /* drop the highlight off the row */
+}
 function cockpitTab(p){
   ['overview', 'activity'].forEach(function(k){
     document.getElementById('p' + k[0].toUpperCase() + k.slice(1)).classList.toggle('hide', k !== p);
@@ -417,6 +476,7 @@ function paintLead(){
 
   paintActivity();
   cockpitTab('overview');
+  draw();                                   /* move the marker to this row */
 }
 function paintActivity(){
   document.getElementById('cActN').textContent = S.activity.length ? '(' + S.activity.length + ')' : '';
@@ -565,11 +625,19 @@ function saveModal(){
   }
 }
 
-/* keyboard: esc closes the top layer */
+/* keyboard: esc closes the top layer, j/k walk the queue */
 document.addEventListener('keydown', function(e){
-  if (e.key !== 'Escape') return;
-  if (!document.getElementById('modal').classList.contains('hide')) closeModal();
-  else if (!document.getElementById('sheet').classList.contains('hide')) closeLead();
+  if (e.key === 'Escape') {
+    if (!document.getElementById('modal').classList.contains('hide')) closeModal();
+    else if (!document.getElementById('sheet').classList.contains('hide')) closeLead();
+    return;
+  }
+  /* never while typing a note, or while a modal is up */
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || '')) || e.metaKey || e.ctrlKey) return;
+  if (!document.getElementById('modal').classList.contains('hide')) return;
+  if (!S.lead) return;
+  if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); step(1); }
+  if (e.key === 'k' || e.key === 'ArrowUp')   { e.preventDefault(); step(-1); }
 });
 
 /* stay signed in across a refresh */

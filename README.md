@@ -35,8 +35,11 @@ modified and keeps running exactly as it does now.
   - **Take this lead** — sets Owner
   - **Stage** — the nine stages you already use, and changing one fires the Meta
     event
-- Built for a phone: one column, big targets, `Add to Home screen` and it behaves
-  like an app.
+- **On a desk the cockpit docks to the right** and the queue stays on screen
+  beside it. The open lead is marked in the list, the header shows *3 / 14*, and
+  **↑ ↓** — or **j** and **k** — step to the next lead without going back to the
+  list. That is the shape of the job: work down a queue, one call at a time.
+- On a phone it is a full-screen sheet instead, same controls.
 
 Roles come from the **Users** sheet as they already do. `admin` sees everything;
 anyone else sees only the sources listed against their name.
@@ -92,6 +95,7 @@ caller gets an email at 9am IST listing their due follow-ups and untouched leads
 | `src/App.html` | the whole UI — one file, no build step, no framework, no CDN |
 | `src/appsscript.json` | manifest: scopes and web-app access |
 | `tools/selftest.js` | 69 checks against a fake spreadsheet — `node tools/selftest.js` |
+| `tools/preview.html` | the screens with a fake server, for working on the UI without deploying |
 | `SETUP.md` | the install |
 
 ## Checking a change before you paste it in
@@ -107,6 +111,19 @@ sees their own sources, that the phone reaching Meta is hashed and in `91…` fo
 that the ledger stops an event firing twice, that a missed call cannot drag a
 Qualified lead backwards, and that no token is committed. 69 checks, no
 dependencies, about a second.
+
+## Working on the screens
+
+```
+python3 -m http.server 8080      # from the repo root
+```
+
+then open <http://localhost:8080/tools/preview.html>. It loads the real
+`src/App.html` against a fake server holding fourteen invented leads — some due,
+some overdue, one booked — so layout, the docked panel and the action modals can
+be worked on in seconds instead of redeploying to Apps Script each time. Any PIN
+signs in. Nothing in `tools/` ships: `Code.gs` is the backend, and `selftest.js`
+is what actually tests it.
 
 ## Secrets
 
