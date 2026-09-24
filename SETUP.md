@@ -29,13 +29,13 @@ Project Settings → **Script Properties** → **Add script property**, twice:
 
 | Property | Value |
 |---|---|
-| `SHEET_ID` | the id from the leads sheet's own URL — the long string between `/d/` and `/edit` |
+| `SHEET_ID` | **required** — the id from the leads sheet's own URL, the long string between `/d/` and `/edit`. It is deliberately not in the code: this repo is public and that id points at live enquiries. |
 | `META_TOKEN` | a Meta system-user access token with `ads_management` on the dataset |
 
-**About the token.** The one currently sitting in the old script's source
-(`EAA0banIQ…`) has been in a shared file and a chat transcript, so treat it as
-public: in Business Manager, delete it and generate a new one. Paste the new
-token here only. It never goes into the code, into the sheet, or into this repo.
+**About the token.** The one currently sitting in the old script's source has
+been in a shared file and pasted into a chat, so treat it as public: in Business
+Manager, delete it and generate a new one. Paste the new token here only. It
+never goes into the code, into the sheet, or into this repo.
 
 Everything else — dataset id, API version, conversion value, the WhatsApp number —
 is read from the **Config** tab of the sheet, so both scripts always agree. Nothing
@@ -73,12 +73,13 @@ The **Users** sheet is what it already was:
 
 | Name | PIN | Role | Sources | (unused) | Active |
 |---|---|---|---|---|---|
-| Pallavi | 482913 | admin | all | | yes |
-| Caller 1 | 730264 | caller | 7788 | | yes |
+| Pallavi | *your 6 digits* | admin | all | | yes |
+| Caller 1 | *your 6 digits* | caller | 7788 | | yes |
 
-- **PIN** — 6 digits, different for each person. This is the only thing standing
-  between the web app URL and the lead data, so don't use 1234 and don't put the
-  PIN in the same message as the link.
+- **PIN** — 6 digits, different for each person, and chosen by you. Do not copy an
+  example from anywhere: this repo is public, and the PIN is the only thing
+  standing between the web app URL and the lead data. Don't use 1234, and don't
+  send the PIN in the same message as the link.
 - **Role** — `admin` sees every lead; anything else is limited to **Sources**.
 - **Sources** — `all`, or the source tags that person handles, comma separated.
   These must match the values in the Leads sheet's *Source* column exactly.
@@ -130,6 +131,9 @@ deploying a new version changes nothing for the callers.
 ---
 
 ## If something is wrong
+
+**"SHEET_ID is not set"** — step 2. The id is not in the code on purpose, so the
+script cannot start without it.
 
 **"Sheet 'Leads' not found"** — `SHEET_ID` is wrong, or the account you deployed as
 cannot open that sheet.

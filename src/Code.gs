@@ -18,9 +18,9 @@
 
 var VERSION = 'crm-1.0.0';
 
-/* The leads spreadsheet. Script Property SHEET_ID wins, so a test copy can be
-   pointed at without editing code. */
-var SHEET_ID_FALLBACK = 'PUT_THIS_IN_SCRIPT_PROPERTIES';
+/* The leads spreadsheet id lives in Script Properties, never in this file:
+   the repo is public, and the id points straight at live patient enquiries.
+   See SETUP.md. */
 
 var SH_LEADS = 'Leads', SH_USERS = 'Users', SH_ACTIVITY = 'Activity', SH_CONFIG = 'Config';
 
@@ -66,7 +66,12 @@ var TZ = 'Asia/Kolkata';
 /* ============================== plumbing ============================== */
 
 function props_() { return PropertiesService.getScriptProperties(); }
-function sheetId_() { return props_().getProperty('SHEET_ID') || SHEET_ID_FALLBACK; }
+function sheetId_() {
+  var id = props_().getProperty('SHEET_ID');
+  if (!id) throw new Error('SHEET_ID is not set. Project Settings \u2192 Script Properties \u2192 ' +
+                           'add SHEET_ID, the long id in the spreadsheet\'s own URL. See SETUP.md.');
+  return id;
+}
 function book_() {
   if (!book_._b) book_._b = SpreadsheetApp.openById(sheetId_());
   return book_._b;

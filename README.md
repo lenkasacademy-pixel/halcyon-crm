@@ -110,10 +110,14 @@ dependencies, about a second.
 
 ## Secrets
 
-None in this repo, and none in the sheet. The Meta token lives in Script
-Properties (`META_TOKEN`) and the spreadsheet id in `SHEET_ID`. Everything else —
-dataset, API version, conversion value, WhatsApp number — comes from the sheet's
-**Config** tab, so the two scripts cannot drift apart.
+None in this repo, and none in the sheet. **This repo is public**, so the Meta
+token (`META_TOKEN`) and the spreadsheet id (`SHEET_ID`) both live in Script
+Properties and the code refuses to run without them. Everything else — dataset,
+API version, conversion value, WhatsApp number — comes from the sheet's **Config**
+tab, so the two scripts cannot drift apart.
+
+Nothing here is a credential on its own: the web app checks a PIN from your Users
+sheet, and reaching the data still needs Google permission on the spreadsheet.
 
 The token currently hardcoded in the old script has been in a shared file; rotate
 it before using this. Same for the Telegram bot token, even though nothing here

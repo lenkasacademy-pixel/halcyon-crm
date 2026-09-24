@@ -173,7 +173,7 @@ function eq(name, got, want) { ok(name + ' = ' + JSON.stringify(want), got === w
 
 function load(props) {
   const book = makeBook();
-  const sandbox = makeSandbox(book, props || {});
+  const sandbox = makeSandbox(book, Object.assign({ SHEET_ID: 'fake-sheet-id' }, props || {}));
   vm.createContext(sandbox);
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'Code.gs'), 'utf8');
   vm.runInContext(src, sandbox, { filename: 'Code.gs' });
@@ -368,7 +368,7 @@ group('SEND_EVENTS = no');
   fetches = [];
   const book = makeBook();
   book.getSheetByName('Config').d.push(['SEND_EVENTS', 'no']);
-  const sandbox = makeSandbox(book, { META_TOKEN: 'FAKE_TOKEN' });
+  const sandbox = makeSandbox(book, { SHEET_ID: 'fake-sheet-id', META_TOKEN: 'FAKE_TOKEN' });
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'Code.gs'), 'utf8'), sandbox);
   sandbox.setup();
