@@ -109,6 +109,7 @@ function makeBook() {
       ['Caller A', '730264', 'caller', '7788', '', 'yes', 'a@example.com'],
       ['Old Staff', '111111', 'caller', '7788', '', 'no', '']
     ]),
+    Log: new Sheet('Log', [['Time', 'What', 'Detail', 'Result']]),
     Config: new Sheet('Config', [
       ['Key', 'Value'],
       ['DATASET_ID', '1568043288155968'],
@@ -199,8 +200,11 @@ group('setup');
 {
   const { G, book } = load({ META_TOKEN: 'FAKE_TOKEN' });
   const head = book.getSheetByName('Leads').d[0];
-  ok('appends the four columns', ['Owner', 'Next action at', 'Next action note', 'Last activity at']
-      .every(c => head.indexOf(c) >= 0), head.slice(-5));
+  ok('appends the action columns', ['Next action at', 'Next action note', 'Last activity at']
+      .every(c => head.indexOf(c) >= 0), head.slice(-4));
+  ok('reuses the intake script\'s Assigned column for ownership',
+     head.filter(c => c === 'Assigned').length === 1 && head.indexOf('Owner') < 0,
+     head.filter(c => /Assigned|Owner/.test(c)));
   eq('leaves the original header order alone', head.slice(0, 21).join(','), LEAD_HEADERS.join(','));
   ok('creates the Activity tab', !!book.getSheetByName('Activity'));
   const again = G.setup();
@@ -265,7 +269,7 @@ group('follow-ups');
   ok('sets the time', r.ok === true, r);
   eq('writes the note', cellOf(book, 'L001', 'Next action note'), 'after her scan');
   ok('writes a real Date, not text', isDate(cellOf(book, 'L001', 'Next action at')));
-  eq('takes ownership when nobody had it', cellOf(book, 'L001', 'Owner'), 'Pallavi');
+  eq('takes ownership when nobody had it', cellOf(book, 'L001', 'Assigned'), 'Pallavi');
   const b = G.bootstrap(t);
   eq('counts as due', b.counts.due, 1);
   ok('bad dates are refused', G.setFollowUp(t, 'L001', 'not-a-date', '').ok === false);
@@ -360,6 +364,29 @@ group('logging a call');
 
   ok('an unknown outcome is refused', G.logCall(t, 'L001', 'telepathy', '').ok === false);
   ok('Last activity at is stamped', isDate(cellOf(book, 'L001', 'Last activity at')));
+}
+
+group('staying in step with the intake script');
+{
+  const { G, book } = load({ META_TOKEN: 'FAKE_TOKEN' });
+  const t = G.login('482913').token;
+  const log = () => book.getSheetByName('Log').d.slice(1);
+
+  ok('a login is logged', log().some(r => r[1] === 'crm login' && r[2] === 'Pallavi'), log());
+  G.setStage(t, 'L001', 'Contacted');
+  const ev = log().filter(r => r[1] === 'event');
+  ok('a Meta send is logged the way the other script logs it',
+     ev.length === 1 && ev[0][2] === 'HContacted L001' && ev[0][3] === 'OK', ev);
+  eq('four columns, its shape not ours', log()[0].length, 4);
+
+  const a2 = G.assign(t, 'L003', 'Caller A');
+  eq('assign writes to Assigned', cellOf(book, 'L003', 'Assigned'), 'Caller A');
+  eq('and reads back as the owner', G.bootstrap(t).leads.filter(l => l.id === 'L003')[0].owner, 'Caller A');
+
+  /* the ledger format is shared, so one script must recognise the other's marks */
+  eq('ledger uses the pipe form', String(cellOf(book, 'L001', 'Events sent')), '|HContacted|');
+  ok('an event the intake script already sent is skipped',
+     G.setStage(t, 'L002', 'Qualified').meta.skipped === 'already sent');
 }
 
 group('the morning digest');

@@ -52,13 +52,15 @@ sheet → *Advanced* → *Go to Halcyon CRM (unsafe)* → **Allow**. The "unsafe
 is what Google shows for any script that has not been through its review; it means
 unverified, not unsafe.
 
-It adds four columns at the **end** of the Leads header row, so every existing
+It adds three columns at the **end** of the Leads header row, so every existing
 column keeps its position and the other script's column map still matches:
 
-- **Owner** — which caller has it
 - **Next action at** — when to call back
 - **Next action note** — why
 - **Last activity at** — for sorting
+
+Ownership goes in **Assigned**, the column your intake script already declares
+and never fills, so there is no second column meaning the same thing.
 
 and creates an **Activity** tab: every call, note, stage change and Meta send,
 append-only, one row each.
@@ -69,12 +71,14 @@ Check the execution log says `added: [...]` with no error.
 
 ## 4. Users and PINs
 
-The **Users** sheet is what it already was:
+The **Users** sheet is exactly the one your intake script already uses, with the
+same six columns in the same order — `Name, PIN, Role, Sources, Telegram chat ID,
+Active`. Do not reorder or rename them: both scripts read them by position.
 
-| Name | PIN | Role | Sources | (unused) | Active |
+| Name | PIN | Role | Sources | Telegram chat ID | Active |
 |---|---|---|---|---|---|
-| Pallavi | *your 6 digits* | admin | all | | yes |
-| Caller 1 | *your 6 digits* | caller | 7788 | | yes |
+| Pallavi | *your 6 digits* | admin | all | *leave as is* | yes |
+| Caller 1 | *your 6 digits* | caller | 7788 | *leave as is* | yes |
 
 - **PIN** — 6 digits, different for each person, and chosen by you. Do not copy an
   example from anywhere: this repo is public, and the PIN is the only thing
@@ -85,7 +89,8 @@ The **Users** sheet is what it already was:
   These must match the values in the Leads sheet's *Source* column exactly.
 - **Active** — `no` switches someone off without deleting the row.
 
-Optionally add an **Email** column (any position) for the morning reminder mail.
+For the morning reminder mail, add an **Email** column **after** Active. The
+intake script reads only the first six columns, so a seventh is invisible to it.
 
 ---
 

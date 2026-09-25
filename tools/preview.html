@@ -82,7 +82,7 @@ var STUB = function () {
       lastActivity: '',
       pageUrl: 'https://halcyonpainfree.com/' + (i % 2 ? 'knee-pain-treatment/' : 'sciatica/'),
       referrer: '', attributed: i % 3 !== 2,
-      eventsSent: STG[i] === 'New' ? [] : ['HAttempted','HContacted'].slice(0, i % 2 + 1),
+      eventsSent: ['HEnquiry'].concat(STG[i] === 'New' ? [] : ['HAttempted','HContacted'].slice(0, i % 2 + 1)),
       lastResult: ''
     };
   });

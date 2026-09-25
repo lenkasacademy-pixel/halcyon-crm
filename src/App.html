@@ -557,10 +557,15 @@ function drawDash(){
 
   var byEv = {}, evTotal = 0;
   win.forEach(function(l){ (l.events || []).forEach(function(e){ byEv[e] = (byEv[e] || 0) + 1; evTotal++; }); });
+  /* Stage events first, in funnel order, then anything else the ledger holds.
+     The intake script fires HEnquiry on every lead and that is not a stage, so
+     listing only the stage events would quietly under-report what Meta got. */
   var order = S.stages.filter(function(s){ return s.event; }).map(function(s){ return s.event; });
+  var extra = Object.keys(byEv).filter(function(e){ return order.indexOf(e) < 0; }).sort();
+  var show = order.filter(function(e){ return byEv[e]; }).concat(extra);
   document.getElementById('evTotal').textContent = evTotal + ' sent';
-  document.getElementById('evTiles').innerHTML = evTotal
-    ? order.filter(function(e){ return byEv[e]; }).map(function(e){ return tile(byEv[e], e); }).join('')
+  document.getElementById('evTiles').innerHTML = show.length
+    ? show.map(function(e){ return tile(byEv[e], e); }).join('')
     : '<p class="empty" style="padding:16px">No events sent for leads in this window.</p>';
 
   var byStage = {};

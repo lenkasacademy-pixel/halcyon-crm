@@ -22,12 +22,18 @@ var VERSION = 'crm-1.0.0';
    the repo is public, and the id points straight at live patient enquiries.
    See SETUP.md. */
 
-var SH_LEADS = 'Leads', SH_USERS = 'Users', SH_ACTIVITY = 'Activity', SH_CONFIG = 'Config';
+var SH_LEADS = 'Leads', SH_USERS = 'Users', SH_ACTIVITY = 'Activity',
+    SH_CONFIG = 'Config', SH_LOG = 'Log';
+
+/* Ownership goes in "Assigned", which the intake script already declares in
+   LEAD_HEADERS and never reads or writes — an empty column meant for exactly
+   this. A second "Owner" beside it would be two names for one thing. */
+var OWNER_COL = 'Assigned';
 
 /* Columns this CRM needs on top of the ones the intake script writes.
    Missing ones are appended to the header row on first run; existing columns
    are never moved, so the other script's column map stays valid. */
-var EXTRA_COLUMNS = ['Owner', 'Next action at', 'Next action note', 'Last activity at'];
+var EXTRA_COLUMNS = ['Next action at', 'Next action note', 'Last activity at'];
 
 var ACTIVITY_HEADERS = ['Time', 'Lead ID', 'Type', 'By', 'Detail'];
 
@@ -82,13 +88,25 @@ function sheet_(name) {
   return sh;
 }
 
+/** Append to the Log tab the intake script already keeps, in its own shape:
+    time, what, detail, result — one audit trail for both scripts, not two. */
+function log_(what, detail, result) {
+  try {
+    var sh = book_().getSheetByName(SH_LOG);
+    if (!sh) return;
+    sh.appendRow([new Date(), what, String(detail).slice(0, 400), String(result).slice(0, 400)]);
+    if (sh.getLastRow() > 2000) sh.deleteRows(2, 500);
+  } catch (e) {}
+}
+
 /** Config values from the leads sheet's own Config tab, so both scripts agree. */
 function cfg_() {
   if (cfg_._c) return cfg_._c;
   var o = {
     DATASET_ID: '1568043288155968', API_VERSION: 'v26.0', TEST_EVENT_CODE: '',
     SITE_ORIGIN: 'https://halcyonpainmanagement.com', CONVERSION_VALUE: 3000,
-    CURRENCY: 'INR', COUNTRY_CODE: '91', SEND_EVENTS: 'yes', WHATSAPP_NUMBER: '918585072072'
+    CURRENCY: 'INR', COUNTRY_CODE: '91', SEND_EVENTS: 'yes', WHATSAPP_NUMBER: '918585072072',
+    SESSION_HOURS: 12
   };
   try {
     var sh = book_().getSheetByName(SH_CONFIG);
@@ -123,7 +141,8 @@ function cols_() {
 function setup() {
   var sh = sheet_(SH_LEADS);
   var map = cols_();
-  var add = EXTRA_COLUMNS.filter(function (c) { return !map[c]; });
+  var want = [OWNER_COL].concat(EXTRA_COLUMNS);   /* Assigned is normally already there */
+  var add = want.filter(function (c) { return !map[c]; });
   if (add.length) {
     sh.getRange(1, sh.getLastColumn() + 1, 1, add.length).setValues([add])
       .setFontWeight('bold').setBackground('#12232e').setFontColor('#ffffff');
@@ -160,7 +179,7 @@ function health_() {
   return {
     version: VERSION, spreadsheet: book_().getName(), leads: Math.max(0, sh.getLastRow() - 1),
     metaTokenSet: !!c.META_TOKEN, dataset: c.DATASET_ID, sendEvents: c.SEND_EVENTS,
-    columnsPresent: EXTRA_COLUMNS.filter(function (x) { return !!cols_()[x]; }),
+    columnsPresent: [OWNER_COL].concat(EXTRA_COLUMNS).filter(function (x) { return !!cols_()[x]; }),
     activitySheet: !!book_().getSheetByName(SH_ACTIVITY)
   };
 }
@@ -182,7 +201,9 @@ function login(pin) {
       sources: String(v[i][3] || '').toLowerCase()
     };
     var token = Utilities.getUuid();
-    props_().setProperty('s_' + token, JSON.stringify({ u: user, exp: Date.now() + 12 * 3600 * 1000 }));
+    var hours = Number(cfg_().SESSION_HOURS) || 12;
+    props_().setProperty('s_' + token, JSON.stringify({ u: user, exp: Date.now() + hours * 3600 * 1000 }));
+    log_('crm login', user.name, 'ok');
     return { ok: true, token: token, user: user };
   }
   return { ok: false, error: 'PIN not recognised' };
@@ -227,7 +248,7 @@ function allLeads_() {
       phone: String(get(r, 'Phone') || ''),
       source: String(get(r, 'Source') || ''),
       stage: String(get(r, 'Status') || 'New'),
-      owner: String(get(r, 'Owner') || ''),
+      owner: String(get(r, OWNER_COL) || ''),
       nextAt: get(r, 'Next action at'),
       nextNote: String(get(r, 'Next action note') || ''),
       lastActivity: get(r, 'Last activity at'),
@@ -431,7 +452,7 @@ function setFollowUp(token, leadId, whenIso, text) {
   if (isNaN(when.getTime())) return { ok: false, error: 'Bad date' };
   sh.getRange(l.row, C['Next action at']).setValue(when);
   sh.getRange(l.row, C['Next action note']).setValue(String(text || '').slice(0, 300));
-  if (C['Owner'] && !l.owner) sh.getRange(l.row, C['Owner']).setValue(u.name);
+  if (C[OWNER_COL] && !l.owner) sh.getRange(l.row, C[OWNER_COL]).setValue(u.name);
   addActivity_(leadId, 'followup', u.name, 'Call back ' + fmt_(when) + (text ? ' — ' + text : ''));
   return { ok: true, nextAt: fmt_(when), nextIso: when.toISOString(), nextNote: String(text || '') };
 }
@@ -442,8 +463,8 @@ function assign(token, leadId, who) {
   var l = leadById_(leadId);
   if (!l) return { ok: false, error: 'Lead not found' };
   var C = cols_();
-  if (!C['Owner']) return { ok: false, error: 'Run setup first' };
-  sheet_(SH_LEADS).getRange(l.row, C['Owner']).setValue(String(who || u.name));
+  if (!C[OWNER_COL]) return { ok: false, error: 'The Leads sheet has no "' + OWNER_COL + '" column' };
+  sheet_(SH_LEADS).getRange(l.row, C[OWNER_COL]).setValue(String(who || u.name));
   addActivity_(leadId, 'owner', u.name, 'Owner: ' + (who || u.name));
   return { ok: true, owner: String(who || u.name) };
 }
@@ -508,6 +529,7 @@ function fireEvent_(leadId, eventName) {
   if (C['Last sent']) sh.getRange(l.row, C['Last sent']).setValue(new Date());
   if (C['Last result']) sh.getRange(l.row, C['Last result']).setValue(out.ok ? ('OK ' + (out.received || 1)) : ('FAIL ' + out.error).slice(0, 220));
   addActivity_(leadId, 'meta', 'system', eventName + ' → ' + (out.ok ? 'sent' : 'failed: ' + out.error));
+  log_('event', eventName + ' ' + leadId, out.ok ? 'OK' : out.error);
   return out;
 }
 

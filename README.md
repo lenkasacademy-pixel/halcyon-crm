@@ -89,10 +89,13 @@ test tool instead of live.
 
 ## What it writes
 
-Four columns appended to **Leads** — `Owner`, `Next action at`, `Next action note`,
+Three columns appended to **Leads** — `Next action at`, `Next action note`,
 `Last activity at` — and a new **Activity** tab, append-only, one row per call,
-note, stage change, owner change and Meta send. Existing columns are never moved or
-renamed, so the other script's column map stays valid.
+note, stage change, owner change and Meta send. Ownership goes in **Assigned**,
+which the intake script already declares and never fills. Existing columns are
+never moved or renamed, so that script's column map stays valid, and calls and
+Meta sends are appended to the **Log** tab it already keeps, in its own
+four-column shape.
 
 ## Follow-up reminders
 
