@@ -40,8 +40,9 @@ svg{flex:none}
 .card-login h1{margin:0 0 4px;font-size:21px}
 .card-login h1 span{color:var(--accent)}
 .card-login p{margin:0 0 20px;color:var(--dim);font-size:13px}
-.pin{width:100%;height:52px;text-align:center;font-size:26px;letter-spacing:10px;padding-left:10px;
-  background:var(--bg);border:1px solid var(--line);border-radius:10px}
+.pin{width:100%;height:52px;text-align:center;font-size:19px;letter-spacing:2px;
+  background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:0 12px}
+.pin:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px var(--soft)}
 .err{color:var(--red);font-size:13px;min-height:18px;margin:10px 0 0}
 
 /* ---------------- top nav ---------------- */
@@ -281,9 +282,9 @@ tbody tr:hover .more{background:var(--soft);color:var(--accent)}
 <section id="login">
   <form class="card-login" onsubmit="doLogin(event)">
     <h1>Halcyon <span>CRM</span></h1>
-    <p>Enter the PIN from the Users sheet.</p>
-    <input class="pin" id="pin" type="tel" inputmode="numeric" maxlength="8" autocomplete="off"
-           placeholder="&bull;&bull;&bull;&bull;" aria-label="PIN">
+    <p>Enter the clinic password.</p>
+    <input class="pin" id="pin" type="password" maxlength="64" autocomplete="current-password"
+           placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" aria-label="Password">
     <p class="err" id="loginErr"></p>
     <button class="btn" type="submit" id="loginBtn" style="margin-top:8px">Open</button>
   </form>
@@ -453,7 +454,8 @@ function doLogin(e){
   btn.innerHTML = '<span class="spin"></span>'; btn.disabled = true;
   call('apiLogin', [pin]).then(function(r){
     btn.innerHTML = 'Open'; btn.disabled = false;
-    if (!r.ok) { document.getElementById('loginErr').textContent = r.error; return; }
+    if (!r.ok) { document.getElementById('loginErr').textContent =
+        r.error === 'PIN not recognised' ? 'Password not recognised' : r.error; return; }
     S.token = r.token;
     try { sessionStorage.setItem('halcyon.crm', r.token); } catch (err) {}
     boot();

@@ -77,15 +77,30 @@ Check the execution log says `added: [...]` with no error.
 
 ---
 
-## 4. Users
+## 4. The login
 
-No change. The CRM reads the **Users** sheet through your existing `apiLogin`,
-so the same PINs, roles and Sources work and nothing needs touching.
+The CRM signs in through your existing `apiLogin`, which compares what is typed
+against **column B** of the Users sheet. It was never restricted to digits — any
+text works — so a single shared password is just a matter of what is in that
+cell.
 
-| Name | PIN | Role | Sources | Telegram chat ID | Active |
-|---|---|---|---|---|---|
-| Pallavi | *6 digits* | admin | all | *leave as is* | yes |
-| Caller 1 | *6 digits* | caller | 7788 | *leave as is* | yes |
+**For one shared login:** put the password in **B2** (the `admin` row, sources
+`all`) and clear B3 onwards. `apiLogin` skips empty values explicitly, so those
+rows can no longer sign in.
+
+Do not delete the rows. The same sheet decides **who gets the Telegram alert**
+for a new lead — `chatIdsForSource_` matches a row's *Sources* against the
+lead's source and messages that row's chat ID. Clearing the password leaves
+that routing exactly as it is; deleting the row silently stops the alerts.
+
+> The same login also opens your older dashboard. Whichever passwords you clear,
+> those people lose that too.
+
+**On what to choose.** This is a public URL holding patients' names, phone
+numbers and what they said is wrong with them. A brand name plus a number is
+guessed in seconds. Three unrelated words — `halcyon-tuesday-lamp` — is just as
+easy to read out over the phone and cannot be walked into. Change it whenever
+someone leaves: one cell, no deploy.
 
 For the optional morning mail, add an **Email** column **after** Active. The
 rest of the script reads only the first six columns, so a seventh is invisible

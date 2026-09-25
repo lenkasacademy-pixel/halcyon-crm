@@ -63,7 +63,10 @@ It becomes cards on a phone.
 - On a phone it is a full-screen sheet instead, same controls.
 
 Roles come from the Users sheet exactly as they already do: `admin` sees
-everything, anyone else only the sources listed against their name.
+everything, anyone else only the sources listed against their name. The login is
+whatever is in column B of that sheet — digits or words, one shared password or
+one per caller. Clear a cell to revoke access; do not delete the row, because
+the same row routes that person's Telegram alerts.
 
 ## Meta events
 
