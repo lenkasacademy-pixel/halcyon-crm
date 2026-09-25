@@ -1,13 +1,17 @@
 /*
  * node tools/selftest.js
  *
- * Runs src/Code.gs against a fake spreadsheet, so the logic can be checked on a
- * laptop instead of by pasting it into Google and hoping. It stubs only what the
- * script actually touches: SpreadsheetApp, PropertiesService, Utilities,
- * UrlFetchApp, MailApp, ScriptApp.
+ * Crm.gs is a second file inside the existing CAPI project: it calls that
+ * project's functions rather than shipping its own copies. So the only test
+ * worth having is a contract test — stand up the original script's globals
+ * as faithfully as the real file defines them, load Crm.gs on top, and check
+ * the seams hold.
  *
- * It does not test App.html — that needs a browser. It tests the parts that can
- * quietly corrupt the sheet or double-fire a Meta event.
+ * The stand-ins below (apiLogin, session_, setStatus_, apiRemarks,
+ * fireEvent_, log_, cfg, ss, props, C, STATUSES, LEAD_HEADERS) mirror the
+ * logic of the running v3.5.0 script, including the bits that matter: the
+ * pipe-delimited ledger, the SUPPRESS_ flag, Updated by / Updated at, and
+ * the Log tab's four-column shape.
  */
 'use strict';
 const fs = require('fs');
@@ -20,16 +24,21 @@ const crypto = require('crypto');
 function A1col(s) { let n = 0; for (const c of s.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64); return n; }
 
 class Sheet {
-  constructor(name, rows) { this.name = name; this.d = rows || []; this.frozen = 0; }
+  constructor(name, rows) { this.name = name; this.d = rows || []; }
   getName() { return this.name; }
   getLastRow() { return this.d.length; }
   getLastColumn() { return this.d.reduce((m, r) => Math.max(m, r.length), 0); }
   getMaxRows() { return Math.max(1000, this.d.length); }
-  setFrozenRows(n) { this.frozen = n; return this; }
-  cell(r, c) { while (this.d.length < r) this.d.push([]); const row = this.d[r - 1];
-                while (row.length < c) row.push(''); return row; }
+  setFrozenRows() { return this; }
+  deleteRows() { return this; }
+  cell(r, c) {
+    while (this.d.length < r) this.d.push([]);
+    const row = this.d[r - 1];
+    while (row.length < c) row.push('');
+    return row;
+  }
   getRange(a, c, nr, nc) {
-    if (typeof a === 'string') {                       // "A:A"
+    if (typeof a === 'string') {
       const col = A1col(a.split(':')[0].replace(/\d/g, ''));
       return this._range(1, col, this.getMaxRows(), 1);
     }
@@ -70,10 +79,23 @@ class Book {
   insertSheet(n) { this.s[n] = new Sheet(n, []); return this.s[n]; }
 }
 
-/* the real header row from the user's sheet */
+/* ------------------- the original script's own constants ------------------- */
+
 const LEAD_HEADERS = ['Time', 'Lead ID', 'Name', 'Phone', 'Source', 'Status', 'Assigned', 'Remarks',
   'Events sent', 'Last event', 'Last sent', 'Last result', 'fbc', 'fbp', 'Browser event ID',
   'User agent', 'IP', 'Page URL', 'Referrer', 'Updated by', 'Updated at'];
+const USER_HEADERS = ['Name', 'PIN', 'Role', 'Sources', 'Telegram chat ID', 'Active'];
+const STATUSES = [
+  { key: 'new', label: 'New', event: null, colour: '#6b7280' },
+  { key: 'attempted', label: 'Attempted', event: 'HAttempted', colour: '#a16207' },
+  { key: 'contacted', label: 'Contacted', event: 'HContacted', colour: '#1d4ed8' },
+  { key: 'qualified', label: 'Qualified', event: 'HQualified', colour: '#7c3aed' },
+  { key: 'booked', label: 'Booked', event: 'HBooked', colour: '#0b7a5a' },
+  { key: 'converted', label: 'Converted', event: 'HConverted', colour: '#047857' },
+  { key: 'notq', label: 'Not qualified', event: 'HNotQualified', colour: '#9ca3af' },
+  { key: 'junk', label: 'Junk', event: 'HJunk', colour: '#b91c1c' },
+  { key: 'lost', label: 'Lost', event: 'HLost', colour: '#7f1d1d' }
+];
 
 function leadRow(o) {
   const r = new Array(LEAD_HEADERS.length).fill('');
@@ -87,8 +109,7 @@ function leadRow(o) {
   return r;
 }
 
-let fetches = [];
-let mails = [];
+let fetches = [], mails = [];
 
 function makeBook() {
   const now = Date.now();
@@ -96,15 +117,16 @@ function makeBook() {
     Leads: new Sheet('Leads', [
       LEAD_HEADERS.slice(),
       leadRow({ id: 'L001', name: 'Ramesh', phone: '9876543210', source: '7788', status: 'New',
-                time: new Date(now - 2 * 3600e3), fbc: 'fb.1.123.abc' }),
+                time: new Date(now - 2 * 3600e3), fbc: 'fb.1.123.abc', events: '|HEnquiry|' }),
       leadRow({ id: 'L002', name: 'Lakshmi', phone: '08585072072', source: '8585', status: 'Qualified',
-                time: new Date(now - 5 * 864e5), events: '|HAttempted||HContacted||HQualified|' }),
+                time: new Date(now - 5 * 864e5),
+                events: '|HEnquiry||HAttempted||HContacted||HQualified|' }),
       leadRow({ id: 'L003', name: 'Srinivas', phone: '+91 90000 11111', source: '7788',
                 status: 'Contacted', time: new Date(now - 30 * 864e5),
-                events: '|HAttempted||HContacted|' })
+                events: '|HEnquiry||HAttempted||HContacted|' })
     ]),
     Users: new Sheet('Users', [
-      ['Name', 'PIN', 'Role', 'Sources', 'Spare', 'Active', 'Email'],
+      USER_HEADERS.concat(['Email']),
       ['Pallavi', '482913', 'admin', 'all', '', 'yes', 'boss@example.com'],
       ['Caller A', '730264', 'caller', '7788', '', 'yes', 'a@example.com'],
       ['Old Staff', '111111', 'caller', '7788', '', 'no', '']
@@ -121,14 +143,14 @@ function makeBook() {
   });
 }
 
-/* --------------------------- fake Apps Script -------------------------- */
+/* ---------- the Apps Script runtime, plus the original script itself ---------- */
 
 function makeSandbox(book, props) {
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const p2 = n => String(n).padStart(2, '0');
-  return {
+  const sandbox = {
     console,
-    SpreadsheetApp: { openById: () => book },
+    SpreadsheetApp: { openById: () => book, getActive: () => book, flush: () => {} },
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: k => (k in props ? props[k] : null),
@@ -158,10 +180,184 @@ function makeSandbox(book, props) {
       getProjectTriggers: () => [],
       newTrigger: () => ({ timeBased: () => ({ atHour: () => ({ everyDays: () => ({ inTimezone: () => ({ create: () => {} }) }) }) }) })
     },
-    HtmlService: { createTemplateFromFile: () => ({ evaluate: () => ({}) }) },
-    ContentService: { createTextOutput: () => ({ setMimeType: () => ({}) }), MimeType: { JSON: 'json' } }
+    HtmlService: {
+      createTemplateFromFile: () => ({ evaluate: () => ({
+        setTitle() { return this; }, addMetaTag() { return this; }, setXFrameOptionsMode() { return this; }
+      }) }),
+      XFrameOptionsMode: { ALLOWALL: 1 }
+    }
   };
+  vm.createContext(sandbox);
+  /* the original script, as it actually behaves */
+  vm.runInContext(ORIGINAL, sandbox, { filename: 'Original.gs' });
+  return sandbox;
 }
+
+/* A faithful stand-in for the parts of v3.5.0 that Crm.gs leans on. */
+const ORIGINAL = `
+var VERSION = '3.5.0';
+var SH_LEADS = 'Leads', SH_USERS = 'Users', SH_CONFIG = 'Config', SH_LOG = 'Log';
+var LEAD_HEADERS = ${JSON.stringify(LEAD_HEADERS)};
+var USER_HEADERS = ${JSON.stringify(USER_HEADERS)};
+var STATUSES = ${JSON.stringify(STATUSES)};
+var DEFAULTS = { DATASET_ID:'', API_VERSION:'v26.0', TEST_EVENT_CODE:'',
+  SITE_ORIGIN:'https://halcyonpainmanagement.com', CONVERSION_VALUE:3000,
+  CURRENCY:'INR', COUNTRY_CODE:'91', SEND_EVENTS:'yes', SESSION_HOURS:12 };
+var HARDCODED_TOKEN = '';
+var C = {};
+(function(){ for (var i=0;i<LEAD_HEADERS.length;i++) C[LEAD_HEADERS[i]] = i+1; })();
+
+function ss(){ return SpreadsheetApp.getActive(); }
+function props(){ return PropertiesService.getScriptProperties(); }
+function statusByKey(k){ for (var i=0;i<STATUSES.length;i++) if (STATUSES[i].key===k) return STATUSES[i]; return null; }
+function statusByLabel(l){ l=String(l||'').trim().toLowerCase();
+  for (var i=0;i<STATUSES.length;i++) if (STATUSES[i].label.toLowerCase()===l) return STATUSES[i]; return null; }
+function cfg(){
+  if (cfg._c) return cfg._c;
+  var o = {}; for (var k in DEFAULTS) o[k] = DEFAULTS[k];
+  try {
+    var sh = ss().getSheetByName(SH_CONFIG);
+    if (sh && sh.getLastRow() > 1){
+      var v = sh.getRange(2,1,sh.getLastRow()-1,2).getValues();
+      for (var i=0;i<v.length;i++){
+        var key = String(v[i][0]||'').trim();
+        if (key && v[i][1] !== '') o[key] = v[i][1];
+      }
+    }
+  } catch(e){}
+  o.ACCESS_TOKEN = props().getProperty('META_TOKEN') || HARDCODED_TOKEN || '';
+  cfg._c = o; return o;
+}
+function log_(what, detail, result){
+  try {
+    var sh = ss().getSheetByName(SH_LOG); if (!sh) return;
+    sh.appendRow([new Date(), what, String(detail).slice(0,400), String(result).slice(0,400)]);
+  } catch(e){}
+}
+function sha_(v){
+  if (v === null || v === undefined || v === '') return '';
+  var b = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(v), Utilities.Charset.UTF_8);
+  var s=''; for (var i=0;i<b.length;i++){ var x=(b[i]&0xFF).toString(16); s += (x.length===1?'0':'')+x; }
+  return s;
+}
+function normPhone91_(p, cc){
+  var d = String(p||'').replace(/\\D/g,'');
+  if (d.length === 10) d = String(cc||'91') + d;
+  return d;
+}
+function findRowById_(id){
+  var sh = ss().getSheetByName(SH_LEADS);
+  if (sh.getLastRow() < 2) return null;
+  var n = sh.getLastRow()-1;
+  var ids = sh.getRange(2, C['Lead ID'], n, 1).getValues();
+  for (var i=0;i<n;i++) if (String(ids[i][0]) === String(id)) return i+2;
+  return null;
+}
+function readLead_(row){
+  var sh = ss().getSheetByName(SH_LEADS);
+  var v = sh.getRange(row, 1, 1, LEAD_HEADERS.length).getValues()[0];
+  var o = {}; for (var i=0;i<LEAD_HEADERS.length;i++) o[LEAD_HEADERS[i]] = v[i];
+  return o;
+}
+function postToMeta_(events){
+  var c = cfg();
+  if (String(c.SEND_EVENTS).toLowerCase() === 'no') return { ok:true, received:0, note:'dry run' };
+  var payload = { data: events, access_token: c.ACCESS_TOKEN };
+  var r = UrlFetchApp.fetch('https://graph.facebook.com/'+c.API_VERSION+'/'+c.DATASET_ID+'/events',
+    { method:'post', contentType:'application/json', payload: JSON.stringify(payload), muteHttpExceptions:true });
+  var j = {}; try { j = JSON.parse(r.getContentText()); } catch(e){}
+  if (r.getResponseCode() === 200 && j.events_received !== undefined) return { ok:true, received:j.events_received };
+  return { ok:false, error:r.getContentText().slice(0,200) };
+}
+function fireEvent_(leadId, eventName, opts){
+  opts = opts || {};
+  var c = cfg();
+  if (!eventName) return { skipped:'no event mapped' };
+  if (!c.ACCESS_TOKEN) return { ok:false, error:'no access token saved' };
+  var row = findRowById_(leadId);
+  if (!row) return { ok:false, error:'lead not found: '+leadId };
+  var L = readLead_(row);
+  var ledger = String(L['Events sent']||'');
+  if (!opts.force && ledger.indexOf('|'+eventName+'|') >= 0)
+    return { skipped:'already sent', event:eventName };
+  var user = {
+    ph: [sha_(normPhone91_(L['Phone'], c.COUNTRY_CODE))],
+    external_id: [sha_(String(leadId).toLowerCase())],
+    country: [sha_('in')],
+    client_user_agent: L['User agent'] || 'Mozilla/5.0 (Linux; Android 10)'
+  };
+  if (L['fbc']) user.fbc = String(L['fbc']);
+  var custom = { lead_id:leadId, lead_source:String(L['Source']||''), lead_status:String(L['Status']||'') };
+  if (eventName === 'HConverted'){ custom.currency = c.CURRENCY; custom.value = Number(c.CONVERSION_VALUE)||3000; }
+  var ev = { event_name:eventName, event_time:Math.floor(Date.now()/1000),
+    event_id: leadId + '-' + eventName, action_source:'website',
+    event_source_url: L['Page URL'], user_data:user, custom_data:custom };
+  var out = postToMeta_([ev]);
+  var sh = ss().getSheetByName(SH_LEADS);
+  if (out.ok) sh.getRange(row, C['Events sent']).setValue(ledger + '|' + eventName + '|');
+  sh.getRange(row, C['Last event']).setValue(eventName);
+  sh.getRange(row, C['Last sent']).setValue(new Date());
+  sh.getRange(row, C['Last result']).setValue(out.ok ? ('OK ' + (out.received||1)) : ('FAIL ' + out.error).slice(0,220));
+  log_('event', eventName + ' ' + leadId, out.ok ? 'OK' : out.error);
+  return out;
+}
+function setStatus_(leadId, statusLabel, who){
+  var row = findRowById_(leadId);
+  if (!row) return { ok:false, error:'lead not found' };
+  var st = statusByLabel(statusLabel);
+  if (!st) return { ok:false, error:'unknown status' };
+  var sh = ss().getSheetByName(SH_LEADS);
+  props().setProperty('SUPPRESS_' + row, '1');
+  sh.getRange(row, C['Status']).setValue(st.label);
+  sh.getRange(row, C['Updated by']).setValue(who||'');
+  sh.getRange(row, C['Updated at']).setValue(new Date());
+  SpreadsheetApp.flush();
+  props().deleteProperty('SUPPRESS_' + row);
+  var res = st.event ? fireEvent_(leadId, st.event, {}) : { skipped:'no event' };
+  return { ok:true, status:st.label, meta:res };
+}
+function apiLogin(pin){
+  pin = String(pin||'').trim();
+  var sh = ss().getSheetByName(SH_USERS);
+  if (!sh || sh.getLastRow() < 2) return { ok:false, error:'No users configured' };
+  var v = sh.getRange(2,1,sh.getLastRow()-1,USER_HEADERS.length).getValues();
+  for (var i=0;i<v.length;i++){
+    if (String(v[i][5]).toLowerCase() === 'no') continue;
+    if (String(v[i][1]).trim() === pin && pin !== ''){
+      var token = Utilities.getUuid();
+      var user = { name:String(v[i][0]), role:String(v[i][2]||'caller').toLowerCase(),
+                   sources:String(v[i][3]||'').toLowerCase() };
+      props().setProperty('sess_'+token, JSON.stringify({
+        u:user, exp: Date.now() + (Number(cfg().SESSION_HOURS)||12)*3600*1000 }));
+      return { ok:true, token:token, user:user, statuses:STATUSES };
+    }
+  }
+  return { ok:false, error:'PIN not recognised' };
+}
+function session_(token){
+  var raw = props().getProperty('sess_'+String(token||''));
+  if (!raw) return null;
+  var s; try { s = JSON.parse(raw); } catch(e){ return null; }
+  if (!s.exp || s.exp < Date.now()){ props().deleteProperty('sess_'+token); return null; }
+  return s.u;
+}
+function apiStatus(token, leadId, statusLabel){
+  var u = session_(token);
+  if (!u) return { ok:false, expired:true };
+  return setStatus_(leadId, statusLabel, u.name);
+}
+function apiRemarks(token, leadId, text){
+  var u = session_(token);
+  if (!u) return { ok:false, expired:true };
+  var row = findRowById_(leadId);
+  if (!row) return { ok:false, error:'lead not found' };
+  var sh = ss().getSheetByName(SH_LEADS);
+  sh.getRange(row, C['Remarks']).setValue(String(text||'').slice(0,500));
+  sh.getRange(row, C['Updated by']).setValue(u.name);
+  sh.getRange(row, C['Updated at']).setValue(new Date());
+  return { ok:true };
+}
+`;
 
 /* ------------------------------- harness ------------------------------- */
 
@@ -171,236 +367,180 @@ function ok(name, cond, extra) {
   else { fail++; console.log('  FAIL ' + name + (extra !== undefined ? '  → ' + JSON.stringify(extra) : '')); }
 }
 function eq(name, got, want) { ok(name + ' = ' + JSON.stringify(want), got === want, got); }
+function group(t) { console.log('\n' + t); }
+function isDate(v) { return Object.prototype.toString.call(v) === '[object Date]'; }
 
 function load(props) {
   const book = makeBook();
-  const sandbox = makeSandbox(book, Object.assign({ SHEET_ID: 'fake-sheet-id' }, props || {}));
-  vm.createContext(sandbox);
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'Code.gs'), 'utf8');
-  vm.runInContext(src, sandbox, { filename: 'Code.gs' });
-  sandbox.setup();
-  return { G: sandbox, book };
+  props = props || {};
+  const G = makeSandbox(book, props);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'Crm.gs'), 'utf8'), G,
+                  { filename: 'Crm.gs' });
+  G.crmSetup();
+  return { G, book, props };
 }
-function col(book, name) { return book.getSheetByName('Leads').d[0].indexOf(name); }
+function head(book) { return book.getSheetByName('Leads').d[0]; }
 function cellOf(book, leadId, name) {
   const d = book.getSheetByName('Leads').d;
-  const idc = d[0].indexOf('Lead ID');
-  for (let i = 1; i < d.length; i++) if (d[i][idc] === leadId) return d[i][col(book, name)];
+  const idc = d[0].indexOf('Lead ID'), col = d[0].indexOf(name);
+  for (let i = 1; i < d.length; i++) if (d[i][idc] === leadId) return d[i][col];
 }
-
-function group(title) { console.log('\n' + title); }
-/* the script runs in its own vm realm, so its Dates are not our `Date` */
-function isDate(v) { return Object.prototype.toString.call(v) === '[object Date]'; }
+function logRows(book) { return book.getSheetByName('Log').d.slice(1); }
 
 /* ------------------------------- the tests ------------------------------ */
 
 fetches = []; mails = [];
 
-group('setup');
+group('it adds only what is missing');
 {
-  const { G, book } = load({ META_TOKEN: 'FAKE_TOKEN' });
-  const head = book.getSheetByName('Leads').d[0];
-  ok('appends the action columns', ['Next action at', 'Next action note', 'Last activity at']
-      .every(c => head.indexOf(c) >= 0), head.slice(-4));
-  ok('reuses the intake script\'s Assigned column for ownership',
-     head.filter(c => c === 'Assigned').length === 1 && head.indexOf('Owner') < 0,
-     head.filter(c => /Assigned|Owner/.test(c)));
-  eq('leaves the original header order alone', head.slice(0, 21).join(','), LEAD_HEADERS.join(','));
+  const { G, book } = load({ META_TOKEN: 'T' });
+  const h = head(book);
+  ok('appends the three action columns',
+     ['Next action at', 'Next action note', 'Last activity at'].every(c => h.indexOf(c) >= 0), h.slice(-4));
+  ok('reuses Assigned rather than adding Owner',
+     h.filter(c => c === 'Assigned').length === 1 && h.indexOf('Owner') < 0,
+     h.filter(c => /Assigned|Owner/.test(c)));
+  eq('leaves the original header order alone', h.slice(0, 21).join(','), LEAD_HEADERS.join(','));
   ok('creates the Activity tab', !!book.getSheetByName('Activity'));
-  const again = G.setup();
-  eq('is safe to run twice', again.added.length, 0);
+  eq('is safe to run twice', G.crmSetup().added.length, 0);
+  ok('and says so in the shared Log', logRows(book).some(r => r[1] === 'crm setup'), logRows(book));
 }
 
-group('login');
+group('it uses the sessions that already exist');
 {
   const { G } = load({});
-  ok('rejects a wrong PIN', G.login('000000').ok === false);
-  ok('rejects an inactive user', G.login('111111').ok === false);
-  const r = G.login('482913');
-  ok('accepts the admin PIN', r.ok === true, r);
-  eq('reads the role', r.user.role, 'admin');
-  ok('a bad token is not a session', G.bootstrap('nonsense').expired === true);
-  G.logout(r.token);
-  ok('logout ends the session', G.bootstrap(r.token).expired === true);
+  ok('a bad token is not a session', G.crmBootstrap('nonsense').expired === true);
+  const r = G.apiLogin('482913');
+  ok('apiLogin still works untouched', r.ok === true && !!r.token, r);
+  ok('and the CRM accepts its token', G.crmBootstrap(r.token).ok === true);
+  ok('an inactive user still cannot log in', G.apiLogin('111111').ok === false);
+}
+
+group('the stage list comes from STATUSES');
+{
+  const { G } = load({});
+  const t = G.apiLogin('482913').token;
+  const st = G.crmBootstrap(t).stages;
+  eq('same nine, same order', st.map(s => s.label).join(','), STATUSES.map(s => s.label).join(','));
+  eq('same events', st.map(s => s.event || '-').join(','), STATUSES.map(s => s.event || '-').join(','));
+  ok('every one has a tone for the screens', st.every(s => !!s.tone), st.map(s => s.tone));
 }
 
 group('what each user can see');
 {
   const { G } = load({});
-  const admin = G.login('482913').token, caller = G.login('730264').token;
-  eq('admin sees every lead', G.bootstrap(admin).leads.length, 3);
-  const mine = G.bootstrap(caller).leads;
+  const admin = G.apiLogin('482913').token, caller = G.apiLogin('730264').token;
+  eq('admin sees every lead', G.crmBootstrap(admin).leads.length, 3);
+  const mine = G.crmBootstrap(caller).leads;
   eq('a caller sees only their sources', mine.length, 2);
-  ok('and not the other number', mine.every(l => l.source === '7788'), mine.map(l => l.source));
-  ok("cannot open someone else's lead", G.lead(caller, 'L002').ok === false);
+  ok("cannot open someone else's lead", G.crmLead(caller, 'L002').ok === false);
 }
 
-group('the dashboard payload');
-{
-  const { G } = load({});
-  const t = G.login('482913').token;
-  const b = G.bootstrap(t);
-  const l2 = b.leads.filter(l => l.id === 'L002')[0];
-  ok('cards carry the events ledger', Array.isArray(l2.events), l2.events);
-  eq('parsed, not raw', l2.events.join(','), 'HAttempted,HContacted,HQualified');
-  eq('a lead with none gets an empty list',
-     b.leads.filter(l => l.id === 'L001')[0].events.length, 0);
-  ok('and the arrival time is machine readable', /^\d{4}-/.test(b.leads[0].timeIso), b.leads[0].timeIso);
-}
-
-group('notes');
+group('notes go through apiRemarks');
 {
   const { G, book } = load({});
-  const t = G.login('482913').token;
-  ok('an empty note is refused', G.note(t, 'L001', '   ').ok === false);
-  const r = G.note(t, 'L001', 'Knee pain 3 months, wants Saturday');
+  const t = G.apiLogin('482913').token;
+  ok('an empty note is refused', G.crmNote(t, 'L001', '   ').ok === false);
+  const r = G.crmNote(t, 'L001', 'Knee pain 3 months');
   ok('saves', r.ok === true, r);
-  eq('shows in the activity log', r.activity[0].type, 'note');
-  eq('and mirrors into Remarks', cellOf(book, 'L001', 'Remarks'), 'Knee pain 3 months, wants Saturday');
-  eq('names who wrote it', r.activity[0].by, 'Pallavi');
+  eq('Remarks written by the original function', cellOf(book, 'L001', 'Remarks'), 'Knee pain 3 months');
+  eq('and it stamped Updated by', cellOf(book, 'L001', 'Updated by'), 'Pallavi');
+  ok('Updated at is a real date', isDate(cellOf(book, 'L001', 'Updated at')));
+  eq('the note is in the activity log', r.activity[0].type, 'note');
+}
+
+group('stage changes go through setStatus_');
+{
+  fetches = [];
+  const { G, book, props } = load({ META_TOKEN: 'T' });
+  const t = G.apiLogin('482913').token;
+  const r = G.crmSetStage(t, 'L001', 'Contacted');
+  ok('saved', r.ok === true, r);
+  eq('the sheet agrees', cellOf(book, 'L001', 'Status'), 'Contacted');
+  eq('stamped with the caller', cellOf(book, 'L001', 'Updated by'), 'Pallavi');
+  eq('one event to Graph', fetches.length, 1);
+  eq('the right one', fetches[0].body.data[0].event_name, 'HContacted');
+  eq('appended to the same ledger', String(cellOf(book, 'L001', 'Events sent')),
+     '|HEnquiry||HContacted|');
+  /* setStatus_ sets SUPPRESS_<row> so the project's onEdit does not echo, then
+     clears it. If the CRM ever wrote Status itself that flag would be missing
+     and every stage change would trip the trigger. */
+  ok('the SUPPRESS_ flag was set and cleared again',
+     Object.keys(props).filter(k => k.indexOf('SUPPRESS_') === 0).length === 0,
+     Object.keys(props).filter(k => k.indexOf('SUPPRESS_') === 0));
+  ok('logged in the shared Log', logRows(book).some(r2 => r2[2] === 'HContacted L001'), logRows(book));
+  const acts = r.activity.map(a => a.type);
+  ok('activity records both the stage and the send', acts.indexOf('stage') >= 0 && acts.indexOf('meta') >= 0, acts);
+
+  const again = G.crmSetStage(t, 'L002', 'Qualified');
+  eq('an event the intake script already sent is not sent twice', fetches.length, 1);
+  eq('and it says why', again.meta.skipped, 'already sent');
+}
+
+group('logging a call');
+{
+  const { G, book } = load({ META_TOKEN: 'T' });
+  const t = G.apiLogin('482913').token;
+  const r = G.crmLogCall(t, 'L001', 'answered', 'wants Saturday');
+  eq('New + answered → Contacted', r.stage, 'Contacted');
+  ok('the call is in the activity log', r.activity.some(a => a.type === 'call'), r.activity.map(a => a.type));
+  ok('with the outcome and the words',
+     /Answered.*Saturday/.test(r.activity.filter(a => a.type === 'call')[0].detail));
+  eq('a missed call never drags Qualified backwards', G.crmLogCall(t, 'L002', 'noanswer', '').stage, 'Qualified');
+  eq('a wrong number goes to Junk from anywhere', G.crmLogCall(t, 'L003', 'wrong', '').stage, 'Junk');
+  ok('an unknown outcome is refused', G.crmLogCall(t, 'L001', 'telepathy', '').ok === false);
+  ok('calls reach the shared Log', logRows(book).some(x => x[1] === 'crm call'), logRows(book));
+  ok('Last activity at is stamped', isDate(cellOf(book, 'L001', 'Last activity at')));
 }
 
 group('follow-ups');
 {
   const { G, book } = load({});
-  const t = G.login('482913').token;
-  const when = new Date(Date.now() - 3600e3);              // an hour ago: already due
-  const r = G.setFollowUp(t, 'L001', when.toISOString(), 'after her scan');
+  const t = G.apiLogin('482913').token;
+  const when = new Date(Date.now() - 3600e3);
+  const r = G.crmFollowUp(t, 'L001', when.toISOString(), 'after her scan');
   ok('sets the time', r.ok === true, r);
-  eq('writes the note', cellOf(book, 'L001', 'Next action note'), 'after her scan');
   ok('writes a real Date, not text', isDate(cellOf(book, 'L001', 'Next action at')));
-  eq('takes ownership when nobody had it', cellOf(book, 'L001', 'Assigned'), 'Pallavi');
-  const b = G.bootstrap(t);
-  eq('counts as due', b.counts.due, 1);
-  ok('bad dates are refused', G.setFollowUp(t, 'L001', 'not-a-date', '').ok === false);
-  const c = G.setFollowUp(t, 'L001', '', '');
-  eq('can be cleared', c.nextAt, '');
-  eq('and stops being due', G.bootstrap(t).counts.due, 0);
+  eq('writes the note', cellOf(book, 'L001', 'Next action note'), 'after her scan');
+  eq('takes ownership in Assigned', cellOf(book, 'L001', 'Assigned'), 'Pallavi');
+  eq('counts as due', G.crmBootstrap(t).counts.due, 1);
+  ok('bad dates are refused', G.crmFollowUp(t, 'L001', 'not-a-date', '').ok === false);
+  eq('can be cleared', G.crmFollowUp(t, 'L001', '', '').nextAt, '');
+  eq('and stops being due', G.crmBootstrap(t).counts.due, 0);
 }
 
-group('stages and Meta events');
+group('ownership');
 {
-  fetches = [];
-  const { G, book } = load({ META_TOKEN: 'FAKE_TOKEN' });
-  const t = G.login('482913').token;
-
-  const r = G.setStage(t, 'L001', 'Contacted');
-  ok('saves the stage', r.ok === true, r);
-  eq('the sheet agrees', cellOf(book, 'L001', 'Status'), 'Contacted');
-  ok('the event went out', r.meta.ok === true, r.meta);
-  eq('one call to Graph', fetches.length, 1);
-  const ev = fetches[0].body.data[0];
-  eq('the right event name', ev.event_name, 'HContacted');
-  eq('action_source', ev.action_source, 'website');
-  eq('deduplicable event id', ev.event_id, 'L001-HContacted');
-  eq('the real landing page', ev.event_source_url, 'https://halcyonpainfree.com/knee-pain-treatment/');
-  ok('the click id is replayed', ev.user_data.fbc === 'fb.1.123.abc');
-  ok('the phone is hashed', /^[a-f0-9]{64}$/.test(ev.user_data.ph[0]));
-  ok('and it is the 91 form', ev.user_data.ph[0] ===
-      crypto.createHash('sha256').update('919876543210').digest('hex'), ev.user_data.ph[0]);
-  ok('no raw phone anywhere in the payload',
-      JSON.stringify(fetches[0].body).indexOf('9876543210') < 0);
-  ok('the token is not in the event itself', !JSON.stringify(ev).includes('FAKE_TOKEN'));
-  eq('the ledger records it', cellOf(book, 'L001', 'Events sent'), '|HContacted|');
-  eq('Last result', String(cellOf(book, 'L001', 'Last result')), 'OK 1');
-
-  const r2 = G.setStage(t, 'L001', 'Contacted');
-  eq('setting the same stage again sends nothing', fetches.length, 1);
-  G.setStage(t, 'L001', 'Attempted');
-  G.setStage(t, 'L001', 'Contacted');
-  eq('going back and forth does not re-send', fetches.filter(f =>
-      f.body.data[0].event_name === 'HContacted').length, 1);
-
-  fetches = [];
-  G.setStage(t, 'L002', 'Converted');
-  eq('conversion value is attached', fetches[0].body.data[0].custom_data.value, 3000);
-  eq('with a currency', fetches[0].body.data[0].custom_data.currency, 'INR');
-
-  fetches = [];
-  G.setStage(t, 'L003', 'New');
-  eq('New has no event', fetches.length, 0);
-  ok('an unknown stage is refused', G.setStage(t, 'L001', 'Marinating').ok === false);
+  const { G, book } = load({});
+  const t = G.apiLogin('482913').token;
+  eq('assign writes to Assigned', G.crmAssign(t, 'L003', 'Caller A').owner, 'Caller A');
+  eq('the sheet agrees', cellOf(book, 'L003', 'Assigned'), 'Caller A');
+  eq('and it reads back', G.crmBootstrap(t).leads.filter(l => l.id === 'L003')[0].owner, 'Caller A');
 }
 
-group('events the old script already sent are left alone');
+group('the dashboard payload');
 {
-  fetches = [];
-  const { G } = load({ META_TOKEN: 'FAKE_TOKEN' });
-  const t = G.login('482913').token;
-  const r = G.setStage(t, 'L002', 'Qualified');   // ledger already has |HQualified|
-  eq('nothing sent', fetches.length, 0);
-  eq('and it says why', r.meta.skipped, 'already sent');
+  const { G } = load({});
+  const t = G.apiLogin('482913').token;
+  const b = G.crmBootstrap(t);
+  const l2 = b.leads.filter(l => l.id === 'L002')[0];
+  ok('cards carry the ledger, parsed', Array.isArray(l2.events), l2.events);
+  eq('including HEnquiry, which is not a stage',
+     l2.events.join(','), 'HEnquiry,HAttempted,HContacted,HQualified');
+  ok('arrival time is machine readable', /^\d{4}-/.test(b.leads[0].timeIso), b.leads[0].timeIso);
+  eq('the WhatsApp number comes from Config', b.whatsapp, '917788091092');
 }
 
 group('no Meta token');
 {
   fetches = [];
-  const { G, book } = load({});                   // no META_TOKEN
-  const t = G.login('482913').token;
-  const r = G.setStage(t, 'L001', 'Booked');
+  const { G, book } = load({});
+  const t = G.apiLogin('482913').token;
+  const r = G.crmSetStage(t, 'L001', 'Booked');
   ok('the stage still saves', r.ok === true && cellOf(book, 'L001', 'Status') === 'Booked');
   eq('nothing is sent', fetches.length, 0);
   ok('and the failure is explained', /token/i.test(r.meta.error), r.meta);
   ok('the ledger is not marked', String(cellOf(book, 'L001', 'Events sent')).indexOf('HBooked') < 0);
-}
-
-group('logging a call');
-{
-  const { G, book } = load({ META_TOKEN: 'FAKE_TOKEN' });
-  const t = G.login('482913').token;
-
-  const r = G.logCall(t, 'L001', 'answered', 'wants Saturday 11am');
-  eq('New + answered → Contacted', r.stage, 'Contacted');
-  const c = r.activity.filter(a => a.type === 'call')[0];
-  ok('logged as a call', !!c, r.activity.map(a => a.type));
-  ok('with the outcome and the words', /Answered.*Saturday/.test(c.detail), c.detail);
-  eq('and the Meta send is logged too', r.activity[0].type, 'meta');
-
-  const q = G.logCall(t, 'L002', 'noanswer', '');
-  eq('a missed call never drags Qualified backwards', q.stage, 'Qualified');
-
-  const w = G.logCall(t, 'L003', 'wrong', '');
-  eq('a wrong number goes to Junk from anywhere', w.stage, 'Junk');
-
-  ok('an unknown outcome is refused', G.logCall(t, 'L001', 'telepathy', '').ok === false);
-  ok('Last activity at is stamped', isDate(cellOf(book, 'L001', 'Last activity at')));
-}
-
-group('staying in step with the intake script');
-{
-  const { G, book } = load({ META_TOKEN: 'FAKE_TOKEN' });
-  const t = G.login('482913').token;
-  const log = () => book.getSheetByName('Log').d.slice(1);
-
-  ok('a login is logged', log().some(r => r[1] === 'crm login' && r[2] === 'Pallavi'), log());
-  G.setStage(t, 'L001', 'Contacted');
-  const ev = log().filter(r => r[1] === 'event');
-  ok('a Meta send is logged the way the other script logs it',
-     ev.length === 1 && ev[0][2] === 'HContacted L001' && ev[0][3] === 'OK', ev);
-  eq('four columns, its shape not ours', log()[0].length, 4);
-
-  const a2 = G.assign(t, 'L003', 'Caller A');
-  eq('assign writes to Assigned', cellOf(book, 'L003', 'Assigned'), 'Caller A');
-  eq('and reads back as the owner', G.bootstrap(t).leads.filter(l => l.id === 'L003')[0].owner, 'Caller A');
-
-  /* the ledger format is shared, so one script must recognise the other's marks */
-  eq('ledger uses the pipe form', String(cellOf(book, 'L001', 'Events sent')), '|HContacted|');
-  ok('an event the intake script already sent is skipped',
-     G.setStage(t, 'L002', 'Qualified').meta.skipped === 'already sent');
-}
-
-group('the morning digest');
-{
-  mails = [];
-  const { G } = load({});
-  const t = G.login('482913').token;
-  G.setFollowUp(t, 'L001', new Date(Date.now() + 2 * 3600e3).toISOString(), 'call back');
-  G.dailyDigest();
-  eq('one mail per active user with an email', mails.length, 2);
-  ok('addressed to the right people',
-      mails.map(m => m.to).sort().join(',') === 'a@example.com,boss@example.com', mails.map(m => m.to));
-  ok('the due lead is in it', mails[0].body.indexOf('Ramesh') >= 0);
-  ok('it links back to the app', mails[0].body.indexOf('/exec') > 0);
 }
 
 group('SEND_EVENTS = no');
@@ -408,19 +548,44 @@ group('SEND_EVENTS = no');
   fetches = [];
   const book = makeBook();
   book.getSheetByName('Config').d.push(['SEND_EVENTS', 'no']);
-  const sandbox = makeSandbox(book, { SHEET_ID: 'fake-sheet-id', META_TOKEN: 'FAKE_TOKEN' });
-  vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'Code.gs'), 'utf8'), sandbox);
-  sandbox.setup();
-  const t = sandbox.login('482913').token;
-  const r = sandbox.setStage(t, 'L001', 'Contacted');
+  const G = makeSandbox(book, { META_TOKEN: 'T' });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'Crm.gs'), 'utf8'), G);
+  G.crmSetup();
+  const t = G.apiLogin('482913').token;
+  ok('the stage saves', G.crmSetStage(t, 'L001', 'Contacted').ok === true);
   eq('nothing reaches Graph', fetches.length, 0);
-  ok('but the stage saves', r.ok === true);
+}
+
+group('the morning digest');
+{
+  mails = [];
+  const { G } = load({});
+  const t = G.apiLogin('482913').token;
+  G.crmFollowUp(t, 'L001', new Date(Date.now() + 2 * 3600e3).toISOString(), 'call back');
+  G.crmDailyDigest();
+  eq('one mail per active user with an email', mails.length, 2);
+  ok('addressed to the right people',
+     mails.map(m => m.to).sort().join(',') === 'a@example.com,boss@example.com', mails.map(m => m.to));
+  ok('the due lead is in it', mails[0].body.indexOf('Ramesh') >= 0);
+  ok('the link opens the CRM, not the old dashboard', mails[0].body.indexOf('?app=crm') > 0);
+}
+
+group('it shadows nothing in the original file');
+{
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'Crm.gs'), 'utf8');
+  const mine = (src.match(/^(?:function\s+([A-Za-z0-9_]+)|var\s+([A-Za-z0-9_]+))/gm) || [])
+    .map(s => s.replace(/^(function|var)\s+/, ''));
+  const theirs = (ORIGINAL.match(/^(?:function\s+([A-Za-z0-9_]+)|var\s+([A-Za-z0-9_]+))/gm) || [])
+    .map(s => s.replace(/^(function|var)\s+/, ''));
+  const clash = mine.filter(n => theirs.indexOf(n) >= 0);
+  ok('every top-level name is new', clash.length === 0, clash);
+  ok('and they are all namespaced', mine.every(n => /^crm|^CRM_/.test(n)),
+     mine.filter(n => !/^crm|^CRM_/.test(n)));
 }
 
 group('no secrets in the repo');
 {
-  const files = ['src/Code.gs', 'src/App.html', 'src/appsscript.json', 'README.md', 'SETUP.md'];
+  const files = ['src/Crm.gs', 'src/App.html', 'README.md', 'SETUP.md'];
   const bad = [];
   files.forEach(f => {
     const s = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');

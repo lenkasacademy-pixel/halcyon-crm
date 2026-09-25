@@ -451,7 +451,7 @@ function doLogin(e){
   var btn = document.getElementById('loginBtn'), pin = document.getElementById('pin').value;
   document.getElementById('loginErr').textContent = '';
   btn.innerHTML = '<span class="spin"></span>'; btn.disabled = true;
-  call('login', [pin]).then(function(r){
+  call('apiLogin', [pin]).then(function(r){
     btn.innerHTML = 'Open'; btn.disabled = false;
     if (!r.ok) { document.getElementById('loginErr').textContent = r.error; return; }
     S.token = r.token;
@@ -463,13 +463,13 @@ function doLogin(e){
   });
 }
 function doLogout(){
-  call('logout', [S.token]);
+  /* the session expires on its own; apiLogin has no logout */
   try { sessionStorage.removeItem('halcyon.crm'); } catch (e) {}
   location.reload();
 }
 
 function boot(){
-  return call('bootstrap', [S.token]).then(function(r){
+  return call('crmBootstrap', [S.token]).then(function(r){
     if (!r.ok) {
       try { sessionStorage.removeItem('halcyon.crm'); } catch (e) {}
       document.getElementById('login').classList.remove('hide');
@@ -706,7 +706,7 @@ function quickStage(e, id){
   e.stopPropagation();
   var label = e.target.value;
   toast('Saving ' + label + '…');
-  call('setStage', [S.token, id, label]).then(function(r){
+  call('crmSetStage', [S.token, id, label]).then(function(r){
     if (!r.ok) { toast(r.error || 'Failed', true); return; }
     bumpLocal(id, { stage: r.stage });
     var meta = r.meta || {};
@@ -725,14 +725,14 @@ function openLead(id){
   document.getElementById('cName').textContent = 'Loading…';
   document.getElementById('cSub').textContent = '';
   document.getElementById('cFacts').innerHTML = '';
-  call('lead', [S.token, id]).then(function(r){
+  call('crmLead', [S.token, id]).then(function(r){
     if (!r.ok) { toast(r.error || 'Could not open', true); closeLead(); return; }
     S.lead = r.lead; S.activity = r.activity;
     paintLead();
   }).catch(function(e){ toast(String(e.message || e), true); });
 }
 function reloadLead(id){
-  call('lead', [S.token, id]).then(function(x){
+  call('crmLead', [S.token, id]).then(function(x){
     if (x.ok) { S.lead = x.lead; S.activity = x.activity; paintLead(); }
   });
 }
@@ -816,7 +816,7 @@ function changeStage(label){
   if (label.toLowerCase() === String(S.lead.stage).toLowerCase()) return;
   var id = S.lead.id;
   toast('Saving ' + label + '…');
-  call('setStage', [S.token, id, label]).then(function(r){
+  call('crmSetStage', [S.token, id, label]).then(function(r){
     if (!r.ok) { toast(r.error || 'Failed', true); return; }
     var meta = r.meta || {};
     toast(meta.ok ? label + ' · Meta event sent'
@@ -905,7 +905,7 @@ function whenIso(){
 }
 function clearFollow(e){
   e.preventDefault();
-  call('setFollowUp', [S.token, S.lead.id, '', '']).then(function(r){
+  call('crmFollowUp', [S.token, S.lead.id, '', '']).then(function(r){
     if (!r.ok) { toast(r.error || 'Failed', true); return; }
     S.lead.nextAt = ''; S.lead.nextIso = ''; S.lead.nextNote = '';
     bumpLocal(S.lead.id, { nextAt:'', nextIso:'', nextNote:'' });
@@ -923,24 +923,24 @@ function saveModal(){
 
   if (kind === 'note') {
     if (!text.trim()) return fail({ error:'Write something first' });
-    call('note', [S.token, id, text]).then(function(r){
+    call('crmNote', [S.token, id, text]).then(function(r){
       if (!r.ok) return fail(r);
       bumpLocal(id, { remarks: text }); done('Note saved');
     }).catch(fail);
   } else if (kind === 'call') {
-    call('logCall', [S.token, id, S.pick, text]).then(function(r){
+    call('crmLogCall', [S.token, id, S.pick, text]).then(function(r){
       if (!r.ok) return fail(r);
       bumpLocal(id, { stage: r.stage }); done('Call logged');
     }).catch(fail);
   } else if (kind === 'followup') {
     var iso = whenIso();
     if (!iso) return fail({ error:'Pick a date and time' });
-    call('setFollowUp', [S.token, id, iso, text]).then(function(r){
+    call('crmFollowUp', [S.token, id, iso, text]).then(function(r){
       if (!r.ok) return fail(r);
       bumpLocal(id, { nextAt: r.nextAt, nextIso: r.nextIso, nextNote: text }); done('Follow-up set');
     }).catch(fail);
   } else if (kind === 'owner') {
-    call('assign', [S.token, id, S.user.name]).then(function(r){
+    call('crmAssign', [S.token, id, S.user.name]).then(function(r){
       if (!r.ok) return fail(r);
       bumpLocal(id, { owner: r.owner }); done('Yours now');
     }).catch(fail);

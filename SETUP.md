@@ -1,163 +1,154 @@
 # Setting it up
 
-About 15 minutes, all in the browser. Nothing to install, nothing to pay for.
+Ten minutes, all in the browser. The CRM goes **inside the CAPI script you are
+already running** — the one bound to the leads sheet. Everything it needs is
+already there: the sheet, the Meta token, the Config tab, the Users sheet.
 
-You will need the leads spreadsheet open in one tab and this repo in another.
+Nothing here replaces or edits your existing code. You add two files and change
+one line.
 
 ---
 
-## 1. Create the script project
+## 1. Add the two files
 
-1. Go to <https://script.google.com> → **New project**.
-2. Rename it (top left) to **Halcyon CRM**.
-3. Delete whatever is in `Code.gs` and paste in all of [`src/Code.gs`](src/Code.gs).
-4. **+** next to *Files* → **HTML** → name it exactly `App` → delete its contents and
+Open the leads spreadsheet → **Extensions ▸ Apps Script**. You should see the
+existing project with your CAPI code and a `Dashboard` HTML file.
+
+1. **+** next to *Files* → **Script** → name it `Crm` → delete the stub and paste
+   in all of [`src/Crm.gs`](src/Crm.gs).
+2. **+** next to *Files* → **HTML** → name it exactly `App` → delete the stub and
    paste in all of [`src/App.html`](src/App.html).
-5. ⚙️ **Project Settings** → tick **Show "appsscript.json" manifest file in editor**.
-   Go back to the editor, open `appsscript.json`, and paste in
-   [`src/appsscript.json`](src/appsscript.json).
-6. Save (⌘S).
+3. Save (⌘S).
 
-This is a *standalone* script, not attached to the sheet. The script that already
-captures leads and sends the Telegram alerts is not touched and keeps working.
-
----
-
-## 2. Point it at the sheet and give it the Meta token
-
-Project Settings → **Script Properties** → **Add script property**, twice:
-
-| Property | Value |
-|---|---|
-| `SHEET_ID` | **required** — the id from the leads sheet's own URL, the long string between `/d/` and `/edit`. It is deliberately not in the code: this repo is public and that id points at live enquiries. |
-| `META_TOKEN` | a Meta system-user access token with `ads_management` on the dataset |
-
-**About the token.** The one currently sitting in the old script's source has
-been in a shared file and pasted into a chat, so treat it as public: in Business
-Manager, delete it and generate a new one. Paste the new token here only. It
-never goes into the code, into the sheet, or into this repo.
-
-Everything else — dataset id, API version, conversion value, the WhatsApp number —
-is read from the **Config** tab of the sheet, so both scripts always agree. Nothing
-to duplicate here.
+Every name in `Crm.gs` starts with `crm` or `CRM_`, so nothing in your original
+file is shadowed. It *calls* your existing functions rather than duplicating
+them — `apiLogin` and `session_` for sessions, `setStatus_` for stage changes,
+`apiRemarks` for notes, `fireEvent_` for the Meta send, plus `cfg`, `ss`, `log_`,
+`C` and `STATUSES`. One CAPI sender, one session store, one audit trail.
 
 ---
 
-## 3. Add the CRM's columns
+## 2. Change one line in your existing file
 
-In the editor, pick `setup` from the function dropdown and press **Run**.
+Find `doGet` in your original script. Near the end it does this:
 
-Google will ask for permission the first time: choose the account that owns the
-sheet → *Advanced* → *Go to Halcyon CRM (unsafe)* → **Allow**. The "unsafe" wording
-is what Google shows for any script that has not been through its review; it means
-unverified, not unsafe.
+```js
+  if (p.health) return json_(healthData_());
 
-It adds three columns at the **end** of the Leads header row, so every existing
-column keeps its position and the other script's column map still matches:
+  var t = HtmlService.createTemplateFromFile('Dashboard');
+```
+
+Add one line immediately **above** that `var t`:
+
+```js
+  if (p.app === 'crm') return crmPage();
+
+  var t = HtmlService.createTemplateFromFile('Dashboard');
+```
+
+That is the only edit to your code. Your old dashboard stays exactly where it
+was; the CRM answers on the same deployment at `?app=crm`.
+
+---
+
+## 3. Add the columns
+
+In the editor, pick `crmSetup` from the function dropdown and press **Run**.
+
+Google may ask for permission again, because the project can now send mail for
+the optional digest. Choose the account that owns the sheet → *Advanced* → *Go
+to … (unsafe)* → **Allow**. "Unsafe" is what Google shows for any script it has
+not reviewed; it means unverified, not unsafe.
+
+It appends **three** columns to the end of the Leads header row, so every
+existing column keeps its position and your `C` map stays valid:
 
 - **Next action at** — when to call back
 - **Next action note** — why
 - **Last activity at** — for sorting
 
-Ownership goes in **Assigned**, the column your intake script already declares
-and never fills, so there is no second column meaning the same thing.
+Ownership goes in **Assigned**, the column `LEAD_HEADERS` already declares and
+nothing writes to, so there is no second column meaning the same thing.
 
-and creates an **Activity** tab: every call, note, stage change and Meta send,
-append-only, one row each.
+It also creates an **Activity** tab: every call, note, stage change and Meta
+send, append-only, one row each.
 
 Check the execution log says `added: [...]` with no error.
 
 ---
 
-## 4. Users and PINs
+## 4. Users
 
-The **Users** sheet is exactly the one your intake script already uses, with the
-same six columns in the same order — `Name, PIN, Role, Sources, Telegram chat ID,
-Active`. Do not reorder or rename them: both scripts read them by position.
+No change. The CRM reads the **Users** sheet through your existing `apiLogin`,
+so the same PINs, roles and Sources work and nothing needs touching.
 
 | Name | PIN | Role | Sources | Telegram chat ID | Active |
 |---|---|---|---|---|---|
-| Pallavi | *your 6 digits* | admin | all | *leave as is* | yes |
-| Caller 1 | *your 6 digits* | caller | 7788 | *leave as is* | yes |
+| Pallavi | *6 digits* | admin | all | *leave as is* | yes |
+| Caller 1 | *6 digits* | caller | 7788 | *leave as is* | yes |
 
-- **PIN** — 6 digits, different for each person, and chosen by you. Do not copy an
-  example from anywhere: this repo is public, and the PIN is the only thing
-  standing between the web app URL and the lead data. Don't use 1234, and don't
-  send the PIN in the same message as the link.
-- **Role** — `admin` sees every lead; anything else is limited to **Sources**.
-- **Sources** — `all`, or the source tags that person handles, comma separated.
-  These must match the values in the Leads sheet's *Source* column exactly.
-- **Active** — `no` switches someone off without deleting the row.
-
-For the morning reminder mail, add an **Email** column **after** Active. The
-intake script reads only the first six columns, so a seventh is invisible to it.
+For the optional morning mail, add an **Email** column **after** Active. The
+rest of the script reads only the first six columns, so a seventh is invisible
+to it.
 
 ---
 
-## 5. Publish it
+## 5. Redeploy
 
-**Deploy** → **New deployment** → gear ⚙️ → **Web app**:
+**Deploy ▸ Manage deployments ▸** ✏️ **→ Version: New version → Deploy.**
 
-- Description: `v1`
-- Execute as: **Me**
-- Who has access: **Anyone**
+The URL does not change. Then:
 
-→ **Deploy**, then copy the **Web app URL** (`https://script.google.com/macros/s/…/exec`).
+- your existing dashboard: `https://script.google.com/macros/s/…/exec`
+- **the CRM: `https://script.google.com/macros/s/…/exec?app=crm`**
 
-"Anyone" means anyone with that URL reaches the *login screen* — it has to be this,
-or callers who are not signed into a Google account on their phone cannot open it.
-The PIN is the actual gate. Treat the URL as semi-secret: send it to the callers,
-don't post it anywhere public.
+Send the callers the `?app=crm` link. On each phone: open it in Chrome → ⋮ →
+**Add to Home screen**, and it behaves like an app.
 
-On each caller's phone: open the URL in Chrome → ⋮ → **Add to Home screen**. It then
-behaves like an app, and the sign-in survives until the phone closes the tab.
-
-Sanity check: `…/exec?health=1` returns a small JSON — `metaTokenSet` should be
-`true` and `leads` should be your real count.
+Editing a file without deploying a new version changes nothing for the callers —
+the deployment serves the version you last published.
 
 ---
 
 ## 6. Morning reminders (optional)
 
-Editor → run `installDailyDigest` once. At 9am IST each active user with an Email
-gets a list of their follow-ups due in the next 24 hours plus anything still New.
-Gmail's free sending limit is far above what this needs.
+Editor → run `crmInstallDigest` once. At 9am IST each active user with an Email
+gets their follow-ups due in the next 24 hours plus anything still New.
 
-To stop it: Triggers (⏰ in the left rail) → delete the `dailyDigest` trigger.
+To stop it: Triggers (⏰ in the left rail) → delete the `crmDailyDigest` trigger.
 
 ---
 
-## Updating it later
+## The token
 
-Paste the changed file over the old one, save, then **Deploy → Manage deployments →**
-✏️ **→ Version: New version → Deploy**. The URL stays the same. Editing without
-deploying a new version changes nothing for the callers.
+You do not need to set one. The CRM calls your `fireEvent_`, which reads
+`ACCESS_TOKEN` from `cfg()` — the `META_TOKEN` script property you already have.
+
+Separately, and still worth doing: that token has been in a shared file and
+pasted into a chat, so treat it as public. Generate a new one in Business
+Manager and replace the `META_TOKEN` property. Both the intake and the CRM pick
+it up with no other change.
 
 ---
 
 ## If something is wrong
 
-**"SHEET_ID is not set"** — step 2. The id is not in the code on purpose, so the
-script cannot start without it.
+**`crmPage is not defined`** — `Crm.gs` was not saved, or the `doGet` edit went
+into a different project. Both files must be in the same Apps Script project.
 
-**"Sheet 'Leads' not found"** — `SHEET_ID` is wrong, or the account you deployed as
-cannot open that sheet.
+**The CRM URL shows the old dashboard** — the `?app=crm` line is below the
+`var t = HtmlService…` line instead of above it, or a new version has not been
+deployed.
 
-**"No Meta token in Script Properties"** — stage changes still save; only the Meta
-send is skipped. Add `META_TOKEN` and it works from the next change on. Nothing is
-lost, but the events missed in between are not sent retroactively.
+**"Run crmSetup first"** — the three columns are missing; step 3.
 
-**Stage saves but the Meta pill says the send failed** — open the lead's Activity
-tab; the `meta` line carries Graph's own error text. Usually an expired token or a
-dataset the token has no permission on. The *Last result* column in the sheet has
-the same message.
+**A stage saves but the Meta pill says it failed** — open the lead's Activity
+tab; the `meta` line carries Graph's own error text, and the same message is in
+the *Last result* column. Usually an expired token.
 
-**An event only fires once, ever** — by design. The **Events sent** column is the
-ledger; if `HConverted` is in there, moving the lead out of Converted and back will
-not send it a second time. That column is shared with the old script, so whichever
-one sent it first counts.
+**An event only fires once, ever** — by design, and it is your ledger doing it.
+`fireEvent_` checks `Events sent` before sending, so if `HConverted` is already
+there, moving the lead out of Converted and back will not send it again.
 
-**Someone sees no leads** — their *Sources* value doesn't match the Source column's
-spelling, or *Active* isn't `yes`.
-
-**"Run setup first"** — the Owner / Next action columns are missing; step 3.
+**Someone sees no leads** — their *Sources* value does not match the Source
+column's spelling, or *Active* is not `yes`. The same rule your dashboard uses.

@@ -104,12 +104,11 @@ var STUB = function () {
   }
 
   var API = {
-    login: function (pin) {
+    apiLogin: function (pin) {
       if (!pin) return { ok:false, error:'Enter your PIN' };
       return { ok:true, token:'preview', user:{ name:'Pallavi', role:'admin', sources:'all' } };
     },
-    logout: function () { return { ok:true }; },
-    bootstrap: function () {
+    crmBootstrap: function () {
       var now = Date.now(), c = { total:leads.length, due:0, overdue:0, today:0, untouched:0 };
       leads.forEach(function (l) {
         if (l.nextIso) { var t = new Date(l.nextIso).getTime();
@@ -121,12 +120,12 @@ var STUB = function () {
                stages:STAGES, outcomes:OUTCOMES, whatsapp:'917788091092', counts:c, byStage:{},
                sources:['7788','8585'], leads:leads.map(card) };
     },
-    lead: function (t, id) {
+    crmLead: function (t, id) {
       var l = byId(id);
       return l ? { ok:true, lead:l, activity:acts[id] || [] } : { ok:false, error:'Lead not found' };
     },
-    note: function (t, id, text) { log(id, 'note', text); byId(id).remarks = text; return { ok:true, activity:acts[id] }; },
-    logCall: function (t, id, key, text) {
+    crmNote: function (t, id, text) { log(id, 'note', text); byId(id).remarks = text; return { ok:true, activity:acts[id] }; },
+    crmLogCall: function (t, id, key, text) {
       var o = OUTCOMES.filter(function (x) { return x.key === key; })[0];
       if (!o) return { ok:false, error:'Unknown outcome' };
       log(id, 'call', o.label + (text ? ' — ' + text : ''));
@@ -136,14 +135,14 @@ var STUB = function () {
       if (want && (!cur || order.indexOf(want.key) > order.indexOf(cur.key) || want.key === 'junk')) l.stage = want.label;
       return { ok:true, stage:l.stage, activity:acts[id] };
     },
-    setStage: function (t, id, label) {
+    crmSetStage: function (t, id, label) {
       var l = byId(id); l.stage = label;
       var st = STAGES.filter(function (s) { return s.label === label; })[0];
       if (st && st.event) { log(id, 'meta', st.event + ' → sent'); l.eventsSent = l.eventsSent.concat([st.event]); }
       log(id, 'stage', label);
       return { ok:true, stage:label, meta: st && st.event ? { ok:true, received:1 } : { skipped:'no event' }, activity:acts[id] };
     },
-    setFollowUp: function (t, id, iso, text) {
+    crmFollowUp: function (t, id, iso, text) {
       var l = byId(id);
       if (!iso) { l.nextAt = ''; l.nextIso = ''; l.nextNote = ''; log(id,'followup','Follow-up cleared');
                   return { ok:true, nextAt:'', nextNote:'' }; }
@@ -151,7 +150,7 @@ var STUB = function () {
       log(id, 'followup', 'Call back ' + l.nextAt + (text ? ' — ' + text : ''));
       return { ok:true, nextAt:l.nextAt, nextIso:iso, nextNote:text || '' };
     },
-    assign: function (t, id, who) { byId(id).owner = who; log(id,'owner','Owner: ' + who); return { ok:true, owner:who }; }
+    crmAssign: function (t, id, who) { byId(id).owner = who; log(id,'owner','Owner: ' + who); return { ok:true, owner:who }; }
   };
 
   /* the shape google.script.run has: chainable handlers, then the call */

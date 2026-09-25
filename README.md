@@ -1,116 +1,105 @@
 # Halcyon CRM
 
-A telecaller screen for the Halcyon leads sheet, with Meta Conversions API
-attached. Google Apps Script + the sheet you already have — no server, no
-database, nothing to pay for.
+Telecaller screens added to the Meta CAPI script already running on the Halcyon
+leads sheet. Two files and a one-line change — no second project, no second
+token, no second copy of anything.
 
-**[SETUP.md](SETUP.md) — how to put it live (~15 minutes, all in the browser).**
+**[SETUP.md](SETUP.md) — how to put it live (~10 minutes, all in the browser).**
 
 ---
 
-## What it is for
+## What it is
 
-The sheet already captures leads and pings Telegram. What it has no screen for is
-the call itself: who to ring next, what was said last time, and when to try again.
-That is this.
+The existing script captures leads, fires the Meta events and pings Telegram.
+What it has no screen for is the call itself: who to ring next, what was said
+last time, when to try again. That is this.
 
-It opens the same spreadsheet by id, as a *separate* standalone script. The
-existing container-bound script — intake, Telegram, its own `onEdit` — is not
-modified and keeps running exactly as it does now.
+It lives *inside* that project as `Crm.gs` and calls its functions rather than
+duplicating them:
+
+| it needs | it uses yours |
+|---|---|
+| sessions | `apiLogin`, `session_` |
+| stage changes | `setStatus_` — including the `SUPPRESS_` flag that stops `onEdit` echoing |
+| notes | `apiRemarks` |
+| the Meta send | `fireEvent_` and its `Events sent` ledger |
+| config, sheet, log | `cfg`, `ss`, `props`, `log_`, `C`, `STATUSES`, `LEAD_HEADERS` |
+
+So there is one CAPI sender, one session store, one audit trail, and one place
+where an event can be marked as sent. Every name it defines starts with `crm` or
+`CRM_`, and a test fails if that ever stops being true.
+
+Your existing dashboard keeps its URL. The CRM answers on the same deployment at
+`?app=crm`.
 
 ## The two screens
 
-**Dashboard** — how the clinic is doing, over 7, 30 or 90 days: new today and
-how many are still uncalled, what is due now, what is overdue, how many booked
-or converted and the rate; where the leads came from by source; how many Meta
-events actually went out; and the pipeline, every stage with a bar.
+**Dashboard** — how the clinic is doing, over 7, 30 or 90 days: new today and how
+many are still uncalled, what is due now, what is overdue, how many booked or
+converted and the rate; where the leads came from by source; how many Meta events
+actually went out; and the pipeline, every stage with a bar.
 
-**Leads** — the table you live in: name with how long ago it arrived, one-tap
-call and WhatsApp, source, owner, the stage as a dropdown you can change
-straight from the row, and the next follow-up coloured by how late it is.
-Search, filter by source and owner, sort, and the quick counts — To call, New,
-Today, Working, All. It becomes cards on a phone.
+**Leads** — the table a caller lives in: name with how long ago it arrived,
+one-tap call and WhatsApp, source, owner, the stage as a dropdown changeable from
+the row, and the next follow-up coloured by how late it is. Search, filter by
+source and owner, sort, and the quick counts — To call, New, Today, Working, All.
+It becomes cards on a phone.
 
 ## What a caller sees
 
-- **To call** — everything whose follow-up time has passed, oldest first. This is
-  the answer to "who do I ring now", and it is the screen the app opens on.
-- **New**, **Today**, **Working**, **All** — plus search by name or phone, and a
-  source filter.
-- Tap a lead for the cockpit: contact, which landing page the lead came from,
-  whether the ad click was matched, and the full history.
+- **To call** — everything whose follow-up time has passed, oldest first. The
+  answer to "who do I ring now".
+- Tap a lead for the cockpit: contact, which landing page it came from, whether
+  the ad click was matched, and the full history.
   - **Call** and **WhatsApp** as one tap each
-  - **Log a call** — outcome + what was said; the stage moves itself, forward only,
-    so a missed call never drags a Qualified lead back down the funnel
-  - **Add a note** — appended to the history, and mirrored into *Remarks* so the
-    sheet still reads the way it always did
-  - **Follow-up** — in 2 hours / tomorrow / 3 days / next week / pick a time
-  - **Take this lead** — sets Owner
-  - **Stage** — the nine stages you already use, and changing one fires the Meta
-    event
+  - **Log a call** — outcome plus what was said; the stage moves itself, forward
+    only, so a missed call never drags a Qualified lead back down the funnel
+  - **Add a note**, **Follow-up** (in 2 hours / tomorrow / 3 days / next week /
+    pick a time), **Take this lead**
+  - **Stage** — the nine you already use; changing one fires the Meta event
 - **On a desk the cockpit docks to the right** and the queue stays on screen
-  beside it. The open lead is marked in the list, the header shows *3 / 14*, and
-  **↑ ↓** — or **j** and **k** — step to the next lead without going back to the
-  list. That is the shape of the job: work down a queue, one call at a time.
+  beside it. The open lead is marked, the header shows *3 / 14*, and **↑ ↓** — or
+  **j** and **k** — step to the next lead without going back to the list.
 - On a phone it is a full-screen sheet instead, same controls.
 
-Roles come from the **Users** sheet as they already do. `admin` sees everything;
-anyone else sees only the sources listed against their name.
+Roles come from the Users sheet exactly as they already do: `admin` sees
+everything, anyone else only the sources listed against their name.
 
 ## Meta events
 
-Stage → custom event, the same names the current script sends:
+Unchanged — the CRM does not send anything itself. A stage change calls
+`setStatus_`, which calls your `fireEvent_`, which checks the `Events sent`
+ledger before sending. An event fires once per lead and no more, whether the
+intake, the sheet or the CRM got there first. Failures land in *Last result* and
+in the lead's Activity tab with Graph's own error text.
 
-| Stage | Event |
-|---|---|
-| Attempted | `HAttempted` |
-| Contacted | `HContacted` |
-| Qualified | `HQualified` |
-| Booked | `HBooked` |
-| Converted | `HConverted` (with `value` + `currency` from Config) |
-| Not qualified | `HNotQualified` |
-| Junk | `HJunk` |
-| Lost | `HLost` |
-
-Each send replays what the website captured on that row — `fbc`, `fbp`, hashed
-phone, user agent, IP, the real landing-page URL — so Meta can match it back to the
-click. Phone and name are SHA-256 hashed before they leave the script; the raw
-values never go to Graph.
-
-The **Events sent** column is the ledger and it is shared with the old script:
-before sending, this one checks whether the event is already in there and skips it
-if so. An event can therefore fire once per lead and no more, whichever script got
-there first. Failures land in **Last result** and in the lead's Activity tab with
-Graph's own error text, so a bad token is visible instead of silent.
-
-Set `SEND_EVENTS` to `no` in the sheet's Config tab to work the screens without
-sending anything to Meta; set `TEST_EVENT_CODE` to see them land in Events Manager's
-test tool instead of live.
+`SEND_EVENTS: no` in the Config tab still works as a dry run.
 
 ## What it writes
 
 Three columns appended to **Leads** — `Next action at`, `Next action note`,
 `Last activity at` — and a new **Activity** tab, append-only, one row per call,
 note, stage change, owner change and Meta send. Ownership goes in **Assigned**,
-which the intake script already declares and never fills. Existing columns are
-never moved or renamed, so that script's column map stays valid, and calls and
-Meta sends are appended to the **Log** tab it already keeps, in its own
+which `LEAD_HEADERS` already declares and nothing writes to. Calls, logins and
+Meta sends also land in the **Log** tab the script already keeps, in its own
 four-column shape.
+
+Existing columns are never moved or renamed, so `C` stays valid.
 
 ## Follow-up reminders
 
-Follow-ups are a queue first: the **To call** tab is the reminder, and it needs
-nothing running in the background. Optionally run `installDailyDigest` once and each
-caller gets an email at 9am IST listing their due follow-ups and untouched leads.
+Follow-ups are a queue first: the **To call** tab is the reminder and needs
+nothing running in the background. Optionally run `crmInstallDigest` once and
+each caller gets an email at 9am IST listing their due follow-ups and untouched
+leads.
 
 ## Files
 
 | | |
 |---|---|
-| `src/Code.gs` | everything server-side: sessions, the sheet reads, notes, follow-ups, stages, the CAPI sender, the digest |
+| `src/Crm.gs` | the second file for your Apps Script project |
 | `src/App.html` | the whole UI — one file, no build step, no framework, no CDN |
-| `src/appsscript.json` | manifest: scopes and web-app access |
-| `tools/selftest.js` | 69 checks against a fake spreadsheet — `node tools/selftest.js` |
+| `tools/selftest.js` | 69 checks, see below |
 | `tools/preview.html` | the screens with a fake server, for working on the UI without deploying |
 | `SETUP.md` | the install |
 
@@ -120,13 +109,17 @@ caller gets an email at 9am IST listing their due follow-ups and untouched leads
 node tools/selftest.js
 ```
 
-It runs `src/Code.gs` against an in-memory spreadsheet with the real header row,
-so the things that would be expensive to get wrong are checked on a laptop instead
-of in production: that `setup` never reorders existing columns, that a caller only
-sees their own sources, that the phone reaching Meta is hashed and in `91…` form,
-that the ledger stops an event firing twice, that a missed call cannot drag a
-Qualified lead backwards, and that no token is committed. 69 checks, no
-dependencies, about a second.
+Because `Crm.gs` calls the original script rather than reimplementing it, the
+test stands that script up first — a faithful stand-in for `apiLogin`,
+`session_`, `setStatus_`, `apiRemarks`, `fireEvent_`, `log_`, `cfg`, `ss`, `C`
+and `STATUSES`, with the real pipe-delimited ledger, the `SUPPRESS_` flag and the
+Log tab's shape — then loads `Crm.gs` on top and checks the seams.
+
+It is the seams that would break quietly: that `Assigned` is reused rather than
+duplicated, that the ledger stops an event firing twice, that a stage change goes
+through `setStatus_` so `SUPPRESS_` is set and cleared, that `HEnquiry` reaches
+the dashboard even though it is not a stage, and that no top-level name shadows
+one in your file. 69 checks, no dependencies, about a second.
 
 ## Working on the screens
 
@@ -137,32 +130,31 @@ python3 -m http.server 8080      # from the repo root
 then open <http://localhost:8080/tools/preview.html>. It loads the real
 `src/App.html` against a fake server holding fourteen invented leads — some due,
 some overdue, one booked — so layout, the docked panel and the action modals can
-be worked on in seconds instead of redeploying to Apps Script each time. Any PIN
-signs in. Nothing in `tools/` ships: `Code.gs` is the backend, and `selftest.js`
-is what actually tests it.
+be worked on in seconds instead of redeploying each time. Any PIN signs in.
+Nothing in `tools/` ships.
 
 ## Secrets
 
-None in this repo, and none in the sheet. **This repo is public**, so the Meta
-token (`META_TOKEN`) and the spreadsheet id (`SHEET_ID`) both live in Script
-Properties and the code refuses to run without them. Everything else — dataset,
-API version, conversion value, WhatsApp number — comes from the sheet's **Config**
-tab, so the two scripts cannot drift apart.
+None, and none needed. The CRM calls your `fireEvent_`, which reads the token
+from `cfg()` — the `META_TOKEN` script property the project already has. There is
+no second token and no spreadsheet id in the code, because the script is bound to
+the sheet.
 
-Nothing here is a credential on its own: the web app checks a PIN from your Users
-sheet, and reaching the data still needs Google permission on the spreadsheet.
+Nothing here is a credential: the screens check a PIN from your Users sheet
+through your own `apiLogin`, and reaching the data still needs Google permission
+on the spreadsheet.
 
-The token currently hardcoded in the old script has been in a shared file; rotate
-it before using this. Same for the Telegram bot token, even though nothing here
-uses Telegram.
+The token currently in use has been in a shared file and pasted into a chat.
+Rotate it in Business Manager and replace the `META_TOKEN` property — both the
+intake and the CRM pick the new one up with no other change.
 
 ## Limits worth knowing
 
-Apps Script is free but not unlimited: 6 minutes per execution, 20,000 UrlFetch
-calls and 90 minutes of runtime a day on a consumer account. At a few hundred leads
-and a handful of callers this is not close. The lead list is read in one range call
-per screen refresh, which is what keeps it fast; a sheet in the tens of thousands of
-rows would want pagination.
+Apps Script is free but not unlimited: 6 minutes per execution, and on a consumer
+account 20,000 UrlFetch calls and 90 minutes of runtime a day. At a few hundred
+leads and a handful of callers this is nowhere near. The lead list is read in one
+range call per refresh, which is what keeps it quick; a sheet in the tens of
+thousands of rows would want pagination.
 
-Two people editing the same lead in the same few seconds: last write wins. With two
-or three callers and an Owner column it has not been worth more than that.
+Two people editing the same lead within a few seconds: last write wins. With two
+or three callers and an owner column it has not been worth more than that.
