@@ -572,6 +572,40 @@ group('the morning digest');
 
 group('it shadows nothing in the original file');
 {
+/* ---- what the visitor answered, read back off the landing page URL ----------
+   The intake drops unknown fields, so /enquiry smuggles its answers through the
+   page URL. If that parsing breaks, a caller silently loses the one thing that
+   tells them what the call is about — and nothing else would fail. */
+{
+  group('it reads back what the visitor answered');
+  const { G } = load();
+  const base = 'https://halcyonpainfree.com/enquiry/';
+
+  const said = G.crmSaid_(base + '?area=Knee&since=A+few+months&place=Bachupally');
+  eq('three answers come back', said.length, 3);
+  eq('the label is readable, not the key', said[0].label, 'Pain area');
+  eq('a plus sign is a space, not a plus', said[1].value, 'A few months');
+  eq('free text survives', said[2].value, 'Bachupally');
+
+  const ad = G.crmAd_(base + '?area=Knee&utm_campaign=Sept&utm_content=Video+A');
+  eq('ad fields are kept apart from answers', ad.length, 2);
+  eq('and the creative is named', ad.find(a => a.label === 'Ad / creative').value, 'Video A');
+  eq('the answer did not leak into them', G.crmSaid_(base + '?area=Knee&utm_content=X').length, 1);
+
+  ok('no query string is no answers', G.crmSaid_(base).length === 0);
+  ok('a blank value is skipped', G.crmSaid_(base + '?area=&since=Weeks').length === 1);
+  ok('tracking junk is not shown as an answer',
+     G.crmAnswers_(base + '?fbclid=abc&gclid=x&cb=12').length === 0);
+  ok('a malformed escape does not throw',
+     (() => { try { G.crmAnswers_(base + '?area=%E0%A4'); return true; } catch (e) { return false; } })());
+
+  const card = G.crmCard_({ id: 'L1', name: 'A', phone: '9', source: 'enquiry', stage: 'New',
+    owner: '', remarks: '', time: new Date(), nextAt: '', nextNote: '', events: '',
+    pageUrl: base + '?area=Neck&since=A+few+weeks&place=Miyapur&utm_content=Video+B' });
+  eq('the row line is what they said', card.answers, 'Neck · A few weeks · Miyapur');
+  ok('the row line leaves the ad out', card.answers.indexOf('Video B') < 0);
+}
+
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'Crm.gs'), 'utf8');
   const mine = (src.match(/^(?:function\s+([A-Za-z0-9_]+)|var\s+([A-Za-z0-9_]+))/gm) || [])
     .map(s => s.replace(/^(function|var)\s+/, ''));

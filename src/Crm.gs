@@ -162,6 +162,23 @@ function crmReadAll_() {
   return out;
 }
 
+/** "Has anything arrived?", as cheaply as it can be asked.
+ *
+ *  getLastRow() reads no cell data, so this costs a fraction of crmBootstrap.
+ *  The screens poll this and only fetch the full list when the number moves,
+ *  which is what keeps an open tab from eating the daily runtime budget: a
+ *  consumer account gets 90 minutes a day, and crmBootstrap takes about two
+ *  seconds, so polling the real thing every 30s from one tab would spend the
+ *  entire day's allowance by mid-afternoon.
+ *
+ *  It only sees new rows, which is exactly what it is for. A stage someone
+ *  else changed does not move the row count — the screens do a full refresh on
+ *  a slower timer for that. */
+function crmPing(token) {
+  if (!session_(token)) return { ok: false, expired: true };
+  return { ok: true, rows: ss().getSheetByName(SH_LEADS).getLastRow() };
+}
+
 /** Which sources a user may see — the same rule apiLeads uses. */
 function crmVisible_(u, leads) {
   var mine = (u.role === 'admin' || u.sources === 'all' || !u.sources)
@@ -170,13 +187,83 @@ function crmVisible_(u, leads) {
   return leads.filter(function (l) { return mine.indexOf(l.source.toLowerCase()) >= 0; });
 }
 
+/* What the visitor answered before they were given the number.
+ *
+ * The intake writes only name, phone, source and the attribution columns — it
+ * drops every field it does not recognise, which was checked against the sheet:
+ * a probe carrying remarks, area, since and note landed with Remarks empty. So
+ * the /enquiry page carries its answers in the page URL's query string, and this
+ * reads them back out for the screens.
+ *
+ * When saveLead_ learns to store a note, delete this, drop the params from the
+ * landing page, and read the Remarks column instead. */
+var CRM_ANSWER_LABELS = {
+  area:  'Pain area',
+  since: 'How long',
+  place: 'Where they are',
+  scans: 'Scans'
+};
+
+/* Which ad brought them. Meta only sends this if the ad's "URL parameters" field
+ * is filled in — see SETUP.md. Nothing here can invent it: no parameters on the
+ * ad means no creative on the lead. */
+var CRM_AD_LABELS = {
+  utm_campaign: 'Campaign',
+  utm_content:  'Ad / creative',
+  utm_term:     'Ad set',
+  utm_source:   'Source',
+  utm_medium:   'Medium',
+  ad_name:      'Ad / creative',
+  adset_name:   'Ad set',
+  campaign_name:'Campaign',
+  ad_id:        'Ad ID',
+  adset_id:     'Ad set ID',
+  campaign_id:  'Campaign ID',
+  placement:    'Placement'
+};
+var CRM_ANSWER_SKIP = /^(fbclid|gclid|msclkid|cb$|v$|t$|_ga)/i;
+
+function crmAnswers_(pageUrl) {
+  var s = String(pageUrl || ''), i = s.indexOf('?');
+  if (i < 0) return [];
+  var parts = s.slice(i + 1).split('&'), out = [];
+  for (var n = 0; n < parts.length; n++) {
+    if (!parts[n]) continue;
+    var j = parts[n].indexOf('=');
+    var k = j < 0 ? parts[n] : parts[n].slice(0, j);
+    var v = j < 0 ? '' : parts[n].slice(j + 1);
+    try {
+      k = decodeURIComponent(k.replace(/\+/g, ' '));
+      v = decodeURIComponent(v.replace(/\+/g, ' '));
+    } catch (e) { continue; }          /* a malformed escape must not kill the lead */
+    if (!v || CRM_ANSWER_SKIP.test(k)) continue;
+    out.push({
+      label: CRM_ANSWER_LABELS[k] || CRM_AD_LABELS[k] || k,
+      value: v,
+      ad: !CRM_ANSWER_LABELS[k] && !!CRM_AD_LABELS[k]
+    });
+  }
+  return out;
+}
+
+/** What they said, and which ad sent them — kept apart so the screens can too. */
+function crmSaid_(pageUrl) {
+  return crmAnswers_(pageUrl).filter(function (a) { return !a.ad; });
+}
+function crmAd_(pageUrl) {
+  return crmAnswers_(pageUrl).filter(function (a) { return a.ad; });
+}
+
 function crmCard_(l) {
+  var a = crmSaid_(l.pageUrl);
   return {
     id: l.id, name: l.name, phone: l.phone, source: l.source, stage: l.stage,
     owner: l.owner, remarks: l.remarks,
     time: crmFmt_(l.time), timeIso: crmIso_(l.time),
     nextAt: crmFmt_(l.nextAt), nextIso: crmIso_(l.nextAt), nextNote: l.nextNote,
-    events: l.events.split('|').filter(Boolean)
+    events: l.events.split('|').filter(Boolean),
+    /* one line for the row, so a caller sees what it is about before opening it */
+    answers: a.map(function (x) { return x.value; }).join(' · ')
   };
 }
 
@@ -227,6 +314,8 @@ function crmLead(token, id) {
       owner: l.owner, remarks: l.remarks,
       time: crmFmt_(l.time), nextAt: crmFmt_(l.nextAt), nextIso: crmIso_(l.nextAt),
       nextNote: l.nextNote, pageUrl: l.pageUrl,
+      said: crmSaid_(l.pageUrl),
+      ad: crmAd_(l.pageUrl),
       attributed: !!l.fbc,
       eventsSent: l.events.split('|').filter(Boolean),
       lastResult: l.lastResult

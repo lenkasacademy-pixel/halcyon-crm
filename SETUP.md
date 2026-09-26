@@ -134,6 +134,33 @@ To stop it: Triggers (⏰ in the left rail) → delete the `crmDailyDigest` trig
 
 ---
 
+## 7. Tell the ads to say which ad they are
+
+The CRM shows what the visitor answered — where the pain is, how long, where
+they are — and which ad sent them. The answers come from the landing page. The
+ad does not, and **nothing in the code can work it out**: Meta only passes it if
+you ask it to.
+
+In Ads Manager, on each ad, fill in **URL parameters** (Ad setup → Tracking →
+URL parameters):
+
+```
+utm_source=facebook&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&ad_id={{ad.id}}
+```
+
+Those `{{ }}` are Meta's own macros; it fills them in per click. The landing page
+keeps them, passes them on with the lead, and the CRM shows them as **Campaign**,
+**Ad / creative** and **Ad set**.
+
+Leave it blank and everything still works — the lead arrives, the answers arrive,
+and the creative simply reads *not tagged*.
+
+Only that short list is carried through; anything else on the URL is dropped,
+because the rest of a query string is other people's tracking and this ends up in
+a sheet the clinic reads.
+
+---
+
 ## The token
 
 You do not need to set one. The CRM calls your `fireEvent_`, which reads

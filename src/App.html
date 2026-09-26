@@ -180,6 +180,10 @@ tbody tr:hover .more{background:var(--soft);color:var(--accent)}
 .lead.is-on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
 .lead .top{display:flex;justify-content:space-between;gap:10px}
 .lead .ph{color:var(--dim);font-size:13px;font-variant-numeric:tabular-nums}
+/* what the visitor answered on the landing page, so a caller knows what the
+   call is about before opening the lead */
+.said{margin-top:3px;font-size:12.5px;color:var(--accent2);font-weight:600}
+.lead .said{margin-top:5px}
 .lead .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
 @media(max-width:900px){
   .tblwrap{display:none}
@@ -458,7 +462,7 @@ function doLogin(e){
         r.error === 'PIN not recognised' ? 'Password not recognised' : r.error; return; }
     S.token = r.token;
     try { sessionStorage.setItem('halcyon.crm', r.token); } catch (err) {}
-    boot();
+    boot().then(startPolling);
   }).catch(function(err){
     btn.innerHTML = 'Open'; btn.disabled = false;
     document.getElementById('loginErr').textContent = String(err.message || err);
@@ -499,6 +503,57 @@ function fill(id, values){
   });
 }
 function refresh(){ toast('Refreshing…'); boot().then(function(){ toast('Up to date'); }); }
+
+/* ---------------- new leads, without anyone pressing anything ----------------
+   Two timers, both paused while the tab is in the background.
+
+   The fast one asks crmPing, which is just getLastRow() and reads no cell data.
+   Only when the row count moves does it pull the full list. The slow one does a
+   full refresh anyway, to pick up stages and follow-ups someone else changed,
+   which a row count cannot see.
+
+   Why not poll the real thing every few seconds: crmBootstrap takes about two
+   seconds of script runtime, and a consumer account gets ninety minutes a day
+   for everything — the CRM, the intake, the Meta sends, Telegram. One tab left
+   open on a 5s timer would spend the lot before lunch and take the lead intake
+   down with it. */
+var POLL_MS = 45000, FULL_MS = 300000;
+var pollTimer = null, fullTimer = null, knownRows = 0, polling = false;
+
+function pollOnce(){
+  if (polling || document.hidden || !S.token) return;
+  polling = true;
+  call('crmPing', [S.token]).then(function(r){
+    polling = false;
+    if (!r || !r.ok) return;
+    if (!knownRows) { knownRows = r.rows; return; }
+    if (r.rows > knownRows) {
+      var n = r.rows - knownRows;
+      knownRows = r.rows;
+      boot().then(function(){
+        toast(n === 1 ? 'New lead' : n + ' new leads');
+        try { if (navigator.vibrate) navigator.vibrate(60); } catch (e) {}
+      });
+    } else {
+      knownRows = r.rows;          /* rows can fall if someone deletes one */
+    }
+  })['catch'](function(){ polling = false; });
+}
+
+function startPolling(){
+  stopPolling();
+  pollTimer = setInterval(pollOnce, POLL_MS);
+  fullTimer = setInterval(function(){ if (!document.hidden && S.token) boot(); }, FULL_MS);
+}
+function stopPolling(){
+  if (pollTimer) clearInterval(pollTimer);
+  if (fullTimer) clearInterval(fullTimer);
+  pollTimer = fullTimer = null;
+}
+document.addEventListener('visibilitychange', function(){
+  /* Coming back to the tab is the moment a caller most wants it current. */
+  if (!document.hidden && S.token) pollOnce();
+});
 
 /* ---------------- which screen ---------------- */
 function go(p){
@@ -664,7 +719,8 @@ function draw(){
   document.getElementById('rows').innerHTML = rows.map(function(l){
     return '<tr class="' + (l.id === openId ? 'is-on' : '') + '" onclick="rowClick(event,\'' + esc(l.id) + '\')">' +
       '<td><div class="nm">' + esc(l.name || 'No name') + '</div>' +
-        '<div class="sub">' + esc(l.phone) + ' · arrived ' + esc(ago(l.timeIso)) + '</div></td>' +
+        '<div class="sub">' + esc(l.phone) + ' · arrived ' + esc(ago(l.timeIso)) + '</div>' +
+        (l.answers ? '<div class="said">' + esc(l.answers) + '</div>' : '') + '</td>' +
       '<td><div class="contact">' +
         '<a class="ic" href="tel:' + esc(l.phone.replace(/[^\d+]/g, '')) + '" title="Call" data-stop>' + SVG_PHONE + '</a>' +
         '<a class="ic wa" href="' + esc(waHref(l.phone)) + '" target="_blank" rel="noopener" title="WhatsApp" data-stop>' + SVG_CHAT + '</a>' +
@@ -681,6 +737,7 @@ function draw(){
     return '<article class="lead' + (l.id === openId ? ' is-on' : '') + '" onclick="openLead(\'' + esc(l.id) + '\')">' +
       '<div class="top"><span class="nm">' + esc(l.name || 'No name') + '</span>' +
       '<span class="ph">' + esc(l.phone) + '</span></div>' +
+      (l.answers ? '<div class="said">' + esc(l.answers) + '</div>' : '') +
       '<div class="meta"><span class="pill ' + tone(l.stage) + '">' + esc(l.stage || 'New') + '</span>' +
       (l.source ? '<span class="tag">' + esc(l.source) + '</span>' : '') +
       (l.owner ? '<span class="tag">' + esc(l.owner) + '</span>' : '') +
@@ -774,17 +831,23 @@ function paintLead(){
   document.getElementById('cCall').href = 'tel:' + l.phone.replace(/[^\d+]/g, '');
   document.getElementById('cWa').href = waHref(l.phone);
 
+  /* What they answered before we gave them the number, and which ad sent them.
+     Both come off the landing page URL — see crmAnswers_ in Crm.gs for why. */
+  var said = (l.said || []), ad = (l.ad || []);
   var f = [
     ['Came in', l.time],
     ['Stage', l.stage],
-    ['Owner', l.owner || '—'],
-    ['Follow-up', l.nextAt ? l.nextAt + (l.nextNote ? ' — ' + l.nextNote : '') : '—'],
-    ['Latest note', l.remarks || '—'],
-    ['Landing page', l.pageUrl ? '<a href="' + esc(l.pageUrl) + '" target="_blank" rel="noopener">' +
-        esc(l.pageUrl.replace(/^https?:\/\/[^/]+/, '')) + '</a>' : '—'],
-    ['Ad click', l.attributed ? 'matched (fbc present)' : 'not matched'],
-    ['Lead ID', l.id]
+    ['Owner', l.owner || '—']
   ];
+  said.forEach(function (a) { f.push([a.label, a.value]); });
+  f.push(['Follow-up', l.nextAt ? l.nextAt + (l.nextNote ? ' — ' + l.nextNote : '') : '—']);
+  f.push(['Latest note', l.remarks || '—']);
+  ad.forEach(function (a) { f.push([a.label, a.value]); });
+  if (!ad.length) f.push(['Ad / creative', 'not tagged']);
+  f.push(['Landing page', l.pageUrl ? '<a href="' + esc(l.pageUrl) + '" target="_blank" rel="noopener">' +
+      esc(l.pageUrl.replace(/^https?:\/\/[^/]+/, '').split('?')[0]) + '</a>' : '—']);
+  f.push(['Ad click', l.attributed ? 'matched (fbc present)' : 'not matched']);
+  f.push(['Lead ID', l.id]);
   document.getElementById('cFacts').innerHTML = f.map(function(p){
     return '<dt>' + p[0] + '</dt><dd>' + (p[0] === 'Landing page' ? p[1] : esc(p[1])) + '</dd>';
   }).join('');
@@ -969,7 +1032,7 @@ document.addEventListener('keydown', function(e){
   try { t = sessionStorage.getItem('halcyon.crm') || ''; } catch (e) {}
   if (!t) return;
   S.token = t;
-  boot();
+  boot().then(startPolling);
 })();
 </script>
 </body>
