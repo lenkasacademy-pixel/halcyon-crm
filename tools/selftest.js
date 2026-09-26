@@ -580,29 +580,45 @@ group('it shadows nothing in the original file');
   group('it reads back what the visitor answered');
   const { G } = load();
   const base = 'https://halcyonpainfree.com/enquiry/';
+  const note = 'Pain: Neck \u00b7 Since: A few weeks \u00b7 Area: Bachupally';
 
-  const said = G.crmSaid_(base + '?area=Knee&since=A+few+months&place=Bachupally');
+  const said = G.crmSaid_(note, base);
   eq('three answers come back', said.length, 3);
-  eq('the label is readable, not the key', said[0].label, 'Pain area');
-  eq('a plus sign is a space, not a plus', said[1].value, 'A few months');
+  eq('the label is the one the page wrote', said[0].label, 'Pain');
+  eq('and the value with it', said[0].value, 'Neck');
   eq('free text survives', said[2].value, 'Bachupally');
 
-  const ad = G.crmAd_(base + '?area=Knee&utm_campaign=Sept&utm_content=Video+A');
-  eq('ad fields are kept apart from answers', ad.length, 2);
-  eq('and the creative is named', ad.find(a => a.label === 'Ad / creative').value, 'Video A');
-  eq('the answer did not leak into them', G.crmSaid_(base + '?area=Knee&utm_content=X').length, 1);
+  /* The answers must not travel on the URL: it becomes event_source_url and
+     goes to Meta, where "area=Knee" beside a hashed phone is health data. */
+  ok('nothing about the pain is on the URL the page now reports',
+     base.indexOf('area=') < 0 && base.indexOf('since=') < 0);
 
-  ok('no query string is no answers', G.crmSaid_(base).length === 0);
-  ok('a blank value is skipped', G.crmSaid_(base + '?area=&since=Weeks').length === 1);
-  ok('tracking junk is not shown as an answer',
-     G.crmAnswers_(base + '?fbclid=abc&gclid=x&cb=12').length === 0);
+  /* but leads captured before that change still read back */
+  const legacy = G.crmSaid_('', base + '?area=Knee&since=A+few+months&place=Miyapur');
+  eq('the old URL form still works', legacy.length, 3);
+  eq('with the friendly label', legacy[0].label, 'Pain area');
+  eq('and plus is a space', legacy[1].value, 'A few months');
+
+  const ad = G.crmAd_(base + '?utm_campaign=Sept&utm_content=Video+A');
+  eq('the ad is read from the URL, where Meta put it', ad.length, 2);
+  eq('and the creative is named', ad.find(a => a.label === 'Ad / creative').value, 'Video A');
+  ok('an ad field is never mistaken for an answer',
+     G.crmSaid_('', base + '?utm_content=X').length === 0);
+
+  ok('a caller note is not parsed as answers', G.crmSaid_('Rang twice, no answer', base).length === 0);
+  ok('no note and no params is no answers', G.crmSaid_('', base).length === 0);
   ok('a malformed escape does not throw',
-     (() => { try { G.crmAnswers_(base + '?area=%E0%A4'); return true; } catch (e) { return false; } })());
+     (() => { try { G.crmSaid_('', base + '?area=%E0%A4'); return true; } catch (e) { return false; } })());
+
+  ok('the screens do not print the same sentence twice',
+     G.crmRemarksIsAnswers_(note, said) === true);
+  ok('but a caller note is still shown',
+     G.crmRemarksIsAnswers_(note + ' \u00b7 rang twice', G.crmSaid_(note + ' \u00b7 rang twice', base)) === false);
 
   const card = G.crmCard_({ id: 'L1', name: 'A', phone: '9', source: 'enquiry', stage: 'New',
-    owner: '', remarks: '', time: new Date(), nextAt: '', nextNote: '', events: '',
-    pageUrl: base + '?area=Neck&since=A+few+weeks&place=Miyapur&utm_content=Video+B' });
-  eq('the row line is what they said', card.answers, 'Neck · A few weeks · Miyapur');
+    owner: '', remarks: note, time: new Date(), nextAt: '', nextNote: '', events: '',
+    pageUrl: base + '?utm_content=Video+B' });
+  eq('the row line is what they said', card.answers, 'Neck \u00b7 A few weeks \u00b7 Bachupally');
   ok('the row line leaves the ad out', card.answers.indexOf('Video B') < 0);
 }
 

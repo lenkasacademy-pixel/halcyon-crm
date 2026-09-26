@@ -246,16 +246,44 @@ function crmAnswers_(pageUrl) {
   return out;
 }
 
-/** What they said, and which ad sent them — kept apart so the screens can too. */
-function crmSaid_(pageUrl) {
+/** What they said, and which ad sent them — kept apart so the screens can too.
+ *
+ *  The answers arrive in Remarks now, written by saveLead_, labelled by the
+ *  landing page: "Pain: Neck · Since: A few weeks · Area: Bachupally". They used
+ *  to ride on the page URL, which was wrong: that URL becomes event_source_url
+ *  and goes to Meta beside a hashed phone number, and "area=Knee" against an
+ *  identifiable person is health information Meta's terms forbid.
+ *
+ *  The URL is still read as a fallback, for the handful of leads captured while
+ *  the answers travelled that way. */
+function crmSaid_(remarks, pageUrl) {
+  var s = String(remarks || '').trim(), out = [];
+  if (s.indexOf(':') >= 0) {
+    var parts = s.split(' · ');
+    for (var i = 0; i < parts.length; i++) {
+      var j = parts[i].indexOf(':');
+      if (j < 0) continue;
+      var label = parts[i].slice(0, j).trim(), value = parts[i].slice(j + 1).trim();
+      if (label && value) out.push({ label: label, value: value });
+    }
+  }
+  if (out.length) return out;
   return crmAnswers_(pageUrl).filter(function (a) { return !a.ad; });
+}
+
+/** True when Remarks is nothing but the intake answers, so the screens do not
+    print the same sentence twice. A caller's own note makes this false. */
+function crmRemarksIsAnswers_(remarks, said) {
+  if (!said.length) return false;
+  var rebuilt = said.map(function (a) { return a.label + ': ' + a.value; }).join(' · ');
+  return rebuilt === String(remarks || '').trim();
 }
 function crmAd_(pageUrl) {
   return crmAnswers_(pageUrl).filter(function (a) { return a.ad; });
 }
 
 function crmCard_(l) {
-  var a = crmSaid_(l.pageUrl);
+  var a = crmSaid_(l.remarks, l.pageUrl);
   return {
     id: l.id, name: l.name, phone: l.phone, source: l.source, stage: l.stage,
     owner: l.owner, remarks: l.remarks,
@@ -314,8 +342,9 @@ function crmLead(token, id) {
       owner: l.owner, remarks: l.remarks,
       time: crmFmt_(l.time), nextAt: crmFmt_(l.nextAt), nextIso: crmIso_(l.nextAt),
       nextNote: l.nextNote, pageUrl: l.pageUrl,
-      said: crmSaid_(l.pageUrl),
+      said: crmSaid_(l.remarks, l.pageUrl),
       ad: crmAd_(l.pageUrl),
+      remarksIsAnswers: crmRemarksIsAnswers_(l.remarks, crmSaid_(l.remarks, l.pageUrl)),
       attributed: !!l.fbc,
       eventsSent: l.events.split('|').filter(Boolean),
       lastResult: l.lastResult

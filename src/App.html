@@ -841,7 +841,7 @@ function paintLead(){
   ];
   said.forEach(function (a) { f.push([a.label, a.value]); });
   f.push(['Follow-up', l.nextAt ? l.nextAt + (l.nextNote ? ' — ' + l.nextNote : '') : '—']);
-  f.push(['Latest note', l.remarks || '—']);
+  if (!l.remarksIsAnswers) f.push(['Latest note', l.remarks || '—']);
   ad.forEach(function (a) { f.push([a.label, a.value]); });
   if (!ad.length) f.push(['Ad / creative', 'not tagged']);
   f.push(['Landing page', l.pageUrl ? '<a href="' + esc(l.pageUrl) + '" target="_blank" rel="noopener">' +
