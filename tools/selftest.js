@@ -146,7 +146,8 @@ function makeBook() {
 /* ---------- the Apps Script runtime, plus the original script itself ---------- */
 
 function makeSandbox(book, props) {
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const p2 = n => String(n).padStart(2, '0');
   const sandbox = {
     console,
@@ -164,9 +165,19 @@ function makeSandbox(book, props) {
         .map(b => (b > 127 ? b - 256 : b)),
       DigestAlgorithm: { SHA_256: 'sha256' },
       Charset: { UTF_8: 'utf8' },
+      /* Order matters: yyyy before MMM before MM, and MM (month) before mm
+         (minutes). The looser version only handled dd/MMM/yyyy/HH/mm, so
+         'yyyy-MM-dd' came out as "2026-MM-26" and 17 August collided with
+         17 September — which quietly counted an out-of-window lead. */
       formatDate: (d, tz, fmt) => fmt
-        .replace('dd', p2(d.getDate())).replace('MMM', MONTHS[d.getMonth()])
-        .replace('yyyy', d.getFullYear()).replace('HH', p2(d.getHours())).replace('mm', p2(d.getMinutes()))
+        .replace('yyyy', d.getFullYear())
+        .replace('EEE', DAYS[d.getDay()])
+        .replace('MMM', MONTHS[d.getMonth()])
+        .replace('MM', p2(d.getMonth() + 1))
+        .replace('dd', p2(d.getDate()))
+        .replace('HH', p2(d.getHours()))
+        .replace('mm', p2(d.getMinutes()))
+        .replace(/(^| )d( |$)/, (m, a, b) => a + d.getDate() + b)
     },
     UrlFetchApp: {
       fetch: (url, opt) => {
@@ -620,6 +631,53 @@ group('it shadows nothing in the original file');
     pageUrl: base + '?utm_content=Video+B' });
   eq('the row line is what they said', card.answers, 'Neck \u00b7 A few weeks \u00b7 Bachupally');
   ok('the row line leaves the ad out', card.answers.indexOf('Video B') < 0);
+}
+
+{
+  group('it reports the day by day figures');
+  const { G } = load();
+  const now = new Date();
+  const day = 864e5;
+  const at = (d, h, m) => new Date(new Date(now.getTime() - d * day).setHours(h, m, 0, 0));
+
+  const leads = [
+    { id: 'A', time: at(0, 9, 0),  stage: 'Contacted' },   /* picked up in 30m */
+    { id: 'B', time: at(0, 10, 0), stage: 'Junk' },        /* picked up in 4h  */
+    { id: 'C', time: at(0, 11, 0), stage: 'New' },         /* never touched    */
+    { id: 'D', time: at(1, 9, 0),  stage: 'Converted' },   /* yesterday, 60m   */
+    { id: 'E', time: new Date(now.getTime() - 40 * day), stage: 'Junk' }
+  ];
+  const first = {
+    A: at(0, 9, 30).getTime(),
+    B: at(0, 14, 0).getTime(),
+    D: at(1, 10, 0).getTime(),
+    E: new Date(now.getTime() - 40 * day).getTime() + 5 * 60000
+  };
+
+  const rows = G.crmDaily_(leads, first, 14);
+  eq('one row per day asked for', rows.length, 14);
+
+  const today = rows[0], yday = rows[1];
+  eq('today counts what arrived today', today.n, 3);
+  eq('and only what was actually picked up', today.worked, 2);
+  eq('the average is of those two, not of all three', today.avgMins, 135);
+  eq('one of them beat the two-hour promise', today.within, 1);
+  eq('junk is counted', today.junk, 1);
+  eq('so is contacted', today.contacted, 1);
+
+  eq('yesterday is its own row', yday.n, 1);
+  eq('with its own average', yday.avgMins, 60);
+  eq('booked and converted count together', yday.converted, 1);
+
+  eq('a lead older than the window is left out', rows.reduce((t, r) => t + r.n, 0), 4);
+  ok('a day with nothing has no average', rows[5].n === 0 && rows[5].avgMins === null);
+
+  /* A first touch cannot precede the lead — a clock skew or a hand-edited
+     Activity row would otherwise produce a negative "response time". */
+  const skew = G.crmDaily_([{ id: 'X', time: at(0, 12, 0), stage: 'New' }],
+                           { X: at(0, 11, 0).getTime() }, 14);
+  eq('a touch before the lead is not counted', skew[0].worked, 0);
+  eq('and leaves the average empty', skew[0].avgMins, null);
 }
 
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'Crm.gs'), 'utf8');

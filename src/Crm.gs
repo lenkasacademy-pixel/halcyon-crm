@@ -28,6 +28,10 @@
 var CRM_VERSION = 'crm-2.0.0';
 var CRM_TZ = 'Asia/Kolkata';
 
+/* The clinic's own promise: every lead touched within two hours. The daily
+   table reports against it, so change it here if the promise changes. */
+var CRM_SLA_MINUTES = 120;
+
 /* Ownership goes in "Assigned", which LEAD_HEADERS already declares and
    nothing writes — an empty column meant for exactly this. */
 var CRM_OWNER_COL = 'Assigned';
@@ -296,6 +300,74 @@ function crmCard_(l) {
 }
 
 /** One payload for the whole app. */
+/* ============================ daily figures ===========================
+ *
+ *  "How long did it take us to get to a lead" needs the FIRST time someone
+ *  touched it, not the last. The Leads sheet only keeps the last, so this
+ *  reads the Activity tab once — it is append-only, one row per call, note,
+ *  stage change and Meta send — and keeps the earliest row per lead.
+ *
+ *  Aggregated here rather than in the browser so the payload stays small and
+ *  the Activity tab is read once per refresh instead of once per lead. */
+function crmFirstTouch_() {
+  var sh = ss().getSheetByName(CRM_ACTIVITY);
+  if (!sh || sh.getLastRow() < 2) return {};
+  var v = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues();   /* Time, Lead ID */
+  var first = {};
+  for (var i = 0; i < v.length; i++) {
+    var id = String(v[i][1] || '');
+    if (!id || !v[i][0]) continue;
+    var t = new Date(v[i][0]).getTime();
+    if (isNaN(t)) continue;
+    if (!first[id] || t < first[id]) first[id] = t;
+  }
+  return first;
+}
+
+function crmDayKey_(d) { return Utilities.formatDate(d, CRM_TZ, 'yyyy-MM-dd'); }
+
+/** One row per day, newest first: what arrived, how fast it was picked up,
+    and how it ended up. `days` counts back from today in the clinic's timezone. */
+function crmDaily_(leads, first, days) {
+  var byDay = {}, order = [];
+  var today = new Date();
+  for (var i = 0; i < days; i++) {
+    var d = new Date(today.getTime() - i * 864e5);
+    var key = crmDayKey_(d);
+    byDay[key] = { date: key, label: Utilities.formatDate(d, CRM_TZ, 'EEE d MMM'),
+                   n: 0, worked: 0, mins: 0, within: 0,
+                   junk: 0, qualified: 0, converted: 0, contacted: 0 };
+    order.push(key);
+  }
+  for (var j = 0; j < leads.length; j++) {
+    var l = leads[j];
+    if (!l.time) continue;
+    var when = new Date(l.time);
+    if (isNaN(when.getTime())) continue;
+    var row = byDay[crmDayKey_(when)];
+    if (!row) continue;                       /* older than the window */
+    row.n++;
+    var st = String(l.stage || '').toLowerCase();
+    if (st === 'junk') row.junk++;
+    else if (st === 'qualified') row.qualified++;
+    else if (st === 'converted' || st === 'booked') row.converted++;
+    else if (st === 'contacted') row.contacted++;
+    var ft = first[l.id];
+    if (ft && ft >= when.getTime()) {
+      row.worked++;
+      var m = (ft - when.getTime()) / 60000;
+      row.mins += m;
+      if (m <= CRM_SLA_MINUTES) row.within++;
+    }
+  }
+  return order.map(function (k) {
+    var r = byDay[k];
+    r.avgMins = r.worked ? Math.round(r.mins / r.worked) : null;
+    delete r.mins;
+    return r;
+  });
+}
+
 function crmBootstrap(token) {
   var u = session_(token);
   if (!u) return { ok: false, expired: true };
@@ -318,6 +390,8 @@ function crmBootstrap(token) {
     counts: counts,
     sources: leads.map(function (l) { return l.source; })
                   .filter(function (s, i, a) { return s && a.indexOf(s) === i; }).sort(),
+    slaMinutes: CRM_SLA_MINUTES,
+    daily: crmDaily_(leads, crmFirstTouch_(), 14),
     leads: leads.map(crmCard_)
   };
 }

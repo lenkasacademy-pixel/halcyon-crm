@@ -116,9 +116,26 @@ var STUB = function () {
         if (l.timeIso && now - new Date(l.timeIso).getTime() < 86400000) c.today++;
         if (l.stage.toLowerCase() === 'new') c.untouched++;
       });
+      /* the same shape crmDaily_ returns, so the panel can be worked on here */
+      var DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      var daily = [];
+      for (var i = 0; i < 14; i++) {
+        var d = new Date(now - i * 86400000);
+        var label = DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MON[d.getMonth()];
+        if (i === 3 || i === 9) { daily.push({ date:'', label:label, n:0, worked:0, avgMins:null,
+          within:0, junk:0, qualified:0, converted:0, contacted:0 }); continue; }
+        var n = [23,18,27,0,14,31,9,21,16,0,12,25,19,7][i];
+        var worked = Math.max(0, n - (i % 4));
+        daily.push({ date:'', label:label, n:n, worked:worked,
+          avgMins: worked ? [42,96,135,null,58,210,31,77,64,null,88,119,45,26][i] : null,
+          within: Math.round(worked * [0.9,0.6,0.4,0,0.8,0.25,0.95,0.7,0.75,0,0.55,0.45,0.85,1][i]),
+          contacted: Math.round(n * 0.55), qualified: Math.round(n * 0.12),
+          converted: i % 5 === 0 ? 1 : 0, junk: Math.round(n * 0.26) });
+      }
       return { ok:true, user:{ name:'Pallavi', role:'admin', sources:'all' }, version:'preview',
                stages:STAGES, outcomes:OUTCOMES, whatsapp:'917788091092', counts:c, byStage:{},
-               sources:['7788','8585'], leads:leads.map(card) };
+               sources:['7788','8585'], slaMinutes:120, daily:daily, leads:leads.map(card) };
     },
     crmLead: function (t, id) {
       var l = byId(id);
@@ -177,7 +194,10 @@ var STUB = function () {
   })() } };
 };
 
-fetch('../src/App.html')
+/* cache-busted: the browser will happily serve a stale App.html here, which
+   shows an old UI while the file on disk is already fixed — an easy hour to
+   lose. */
+fetch('../src/App.html?v=' + Date.now(), { cache: 'no-store' })
   .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
   .then(function (html) {
     var stub = '<scr' + 'ipt>(' + STUB.toString() + ')();</scr' + 'ipt>';

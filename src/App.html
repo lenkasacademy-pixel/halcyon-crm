@@ -121,6 +121,21 @@ svg{flex:none}
 .bar i.violet{background:#8b5cf6} .bar i.teal{background:#14b8a6}
 .bar i.green{background:#22c55e} .bar i.red{background:#ef4444}
 
+/* ---------------- day by day ---------------- */
+.daywrap{overflow-x:auto;margin:0 -16px;padding:0 16px}
+table.day{width:100%;border-collapse:collapse;min-width:680px}
+table.day th{text-align:right;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--dim);font-weight:700;padding:0 0 8px;white-space:nowrap}
+table.day th:first-child{text-align:left}
+table.day td{text-align:right;padding:9px 0;border-top:1px solid var(--line2);
+  font-variant-numeric:tabular-nums}
+table.day td:first-child{text-align:left;font-weight:600;white-space:nowrap}
+table.day tr.quiet td{color:var(--faint)}
+table.day td.z{color:var(--faint)}
+table.day td.good{color:var(--green);font-weight:650}
+table.day td.bad{color:var(--red);font-weight:650}
+.daynote{margin:12px 0 0;font-size:12.5px;color:var(--dim);line-height:1.5}
+
 /* ---------------- filters ---------------- */
 .filters{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:14px}
 .fld{display:flex;align-items:center;gap:7px;height:38px;padding:0 11px;background:var(--card);
@@ -334,6 +349,23 @@ tbody tr:hover .more{background:var(--soft);color:var(--accent)}
       <h2 class="panel__h">Pipeline <span class="right" id="pipeTotal"></span></h2>
       <div class="pipe" id="pipe"></div>
     </section>
+
+    <section class="panel">
+      <h2 class="panel__h">Day by day
+        <span class="right" id="dayNote"></span></h2>
+      <div class="daywrap">
+        <table class="day">
+          <thead><tr>
+            <th>Day</th><th>New</th><th>Picked up</th><th>Avg time to first touch</th>
+            <th>Within SLA</th><th>Contacted</th><th>Qualified</th><th>Booked</th><th>Junk</th>
+          </tr></thead>
+          <tbody id="dayRows"></tbody>
+        </table>
+      </div>
+      <p class="daynote">“Time to first touch” is from the lead arriving to the first
+        call, note or stage change on it — taken from the Activity tab, so it measures
+        when someone actually did something, not when the row was last edited.</p>
+    </section>
   </main>
 
   <!-- ---------- leads ---------- -->
@@ -423,6 +455,7 @@ function call(fn, args){
   });
 }
 var S = { token:'', user:null, leads:[], stages:[], outcomes:[], counts:{}, whatsapp:'',
+          daily:[], sla:120,
           tab:'queue', view:[], lead:null, activity:[], modal:null, pick:null,
           page:'dash', range:30 };
 
@@ -484,6 +517,7 @@ function boot(){
     }
     S.user = r.user; S.leads = r.leads; S.stages = r.stages; S.outcomes = r.outcomes;
     S.counts = r.counts; S.whatsapp = r.whatsapp;
+    S.daily = r.daily || []; S.sla = r.slaMinutes || 120;
     document.getElementById('login').classList.add('hide');
     document.getElementById('app').classList.remove('hide');
     document.getElementById('uName').textContent = r.user.name;
@@ -577,19 +611,62 @@ function setRange(d){ S.range = d; paintRange(); drawDash(); }
 function inRange(l){
   return !!l.timeIso && Date.now() - new Date(l.timeIso).getTime() <= S.range * 864e5;
 }
+/* One row per day: what arrived, how quickly anyone got to it, where it ended.
+   Aggregated server-side in crmDaily_ because the first-touch time lives in the
+   Activity tab, not on the lead. */
+function mins(m){
+  if (m === null || m === undefined) return '—';
+  if (m < 60) return m + 'm';
+  var h = Math.floor(m / 60), r = m % 60;
+  return h + 'h' + (r ? ' ' + r + 'm' : '');
+}
+function drawDaily(){
+  var rows = S.daily || [];
+  var body = document.getElementById('dayRows');
+  if (!body) return;
+  var live = rows.filter(function(d){ return d.n > 0; });
+  document.getElementById('dayNote').textContent = live.length
+    ? 'last ' + rows.length + ' days · SLA ' + mins(S.sla)
+    : 'nothing yet';
+  if (!live.length){
+    body.innerHTML = '<tr><td colspan="9" class="z" style="padding:16px 0">' +
+      'No leads in the last ' + rows.length + ' days.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(function(d){
+    if (!d.n) return '<tr class="quiet"><td>' + esc(d.label) + '</td>' +
+      '<td class="z">0</td><td class="z">—</td><td class="z">—</td><td class="z">—</td>' +
+      '<td class="z">—</td><td class="z">—</td><td class="z">—</td><td class="z">—</td></tr>';
+    var pct = d.worked ? Math.round(100 * d.within / d.worked) : 0;
+    var slaCls = !d.worked ? 'z' : (pct >= 80 ? 'good' : pct < 50 ? 'bad' : '');
+    var num = function(n){ return '<td' + (n ? '' : ' class="z"') + '>' + n + '</td>'; };
+    return '<tr><td>' + esc(d.label) + '</td>' +
+      '<td>' + d.n + '</td>' +
+      num(d.worked) +
+      '<td' + (d.avgMins === null ? ' class="z"' : '') + '>' + mins(d.avgMins) + '</td>' +
+      '<td class="' + slaCls + '">' + (d.worked ? pct + '%' : '—') + '</td>' +
+      num(d.contacted) + num(d.qualified) + num(d.converted) + num(d.junk) +
+    '</tr>';
+  }).join('');
+}
+
 function drawDash(){
   var now = Date.now(), all = S.leads, win = all.filter(inRange);
-  var k = { today:0, untouched:0, due:0, overdue:0, won:0 };
+  var k = { today:0, untouched:0, due:0, overdue:0, won:0, booked:0, junk:0, junkWin:0 };
   all.forEach(function(l){
     var st = String(l.stage || '').toLowerCase();
     if (l.timeIso && now - new Date(l.timeIso).getTime() < 864e5) k.today++;
     if (st === 'new' || st === '') k.untouched++;
+    if (st === 'junk') k.junk++;
     if (l.nextIso) {
       var t = new Date(l.nextIso).getTime();
+      k.booked++;                       /* anything with a follow-up on it */
       if (t <= now) k.due++;
       if (t <= now - 864e5) k.overdue++;
     }
   });
+  win.forEach(function(l){ if (String(l.stage || '').toLowerCase() === 'junk') k.junkWin++; });
+  var junkRate = win.length ? Math.round(100 * k.junkWin / win.length) : 0;
   win.forEach(function(l){
     var st = String(l.stage || '').toLowerCase();
     if (st === 'converted' || st === 'booked') k.won++;
@@ -601,8 +678,12 @@ function drawDash(){
     kpi('To call now', k.due, 'follow-up time has passed'),
     kpi('Overdue', k.overdue, 'more than a day late', k.overdue ? 'warn' : ''),
     kpi('Booked or converted', k.won, 'in the last ' + S.range + ' days', k.won ? 'go' : ''),
-    kpi('Conversion', rate + '%', k.won + ' of ' + win.length + ' · last ' + S.range + ' days')
+    kpi('Conversion', rate + '%', k.won + ' of ' + win.length + ' · last ' + S.range + ' days'),
+    kpi('Follow-ups set', k.booked, k.due + ' of them due now'),
+    kpi('Junk', k.junkWin, junkRate + '% of the last ' + S.range + ' days · ' + k.junk + ' all time',
+        junkRate >= 40 ? 'warn' : '')
   ].join('');
+  drawDaily();
 
   var bySrc = {};
   win.forEach(function(l){ var s = l.source || 'unknown'; bySrc[s] = (bySrc[s] || 0) + 1; });
