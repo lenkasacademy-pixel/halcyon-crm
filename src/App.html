@@ -809,8 +809,14 @@ function tile(n, label){
 }
 
 /* ---------------- the leads table ---------------- */
+/* "To call" is the urgent queue — follow-ups whose time has passed. "Follow-ups"
+   is everything scheduled, due or not, soonest first: without it a callback set
+   for tomorrow appears in no tab of its own and is only findable by scrolling
+   Working. They are different questions — what must I do now, and what have I
+   promised — so they get different tabs. */
 var TABS = [
   { k:'queue', label:'To call' },
+  { k:'due',   label:'Follow-ups' },
   { k:'new',   label:'New' },
   { k:'today', label:'Today' },
   { k:'open',  label:'Working' },
@@ -820,8 +826,11 @@ function drawChips(){
   var now = Date.now();
   var n = {
     queue: S.leads.filter(function(l){ return l.nextIso && new Date(l.nextIso).getTime() <= now; }).length,
+    due:   S.leads.filter(function(l){ return !!l.nextIso; }).length,
     new:   S.leads.filter(function(l){ var s = String(l.stage||'').toLowerCase(); return s === 'new' || s === ''; }).length,
     today: S.leads.filter(function(l){ return l.timeIso && now - new Date(l.timeIso).getTime() < 864e5; }).length,
+    open:  S.leads.filter(function(l){ var st = String(l.stage||'').toLowerCase();
+             return DONE.indexOf(st) < 0 && st !== 'new'; }).length,
     all:   S.leads.length
   };
   document.getElementById('chips').innerHTML = TABS.map(function(t){
@@ -844,6 +853,7 @@ function filtered(){
     if (q && (l.name + ' ' + l.phone).toLowerCase().indexOf(q) < 0) return false;
     var st = String(l.stage || '').toLowerCase();
     if (S.tab === 'queue') return l.nextIso && new Date(l.nextIso).getTime() <= now;
+    if (S.tab === 'due')   return !!l.nextIso;
     if (S.tab === 'new')   return st === 'new' || st === '';
     if (S.tab === 'today') return l.timeIso && now - new Date(l.timeIso).getTime() < 864e5;
     if (S.tab === 'open')  return DONE.indexOf(st) < 0 && st !== 'new';
