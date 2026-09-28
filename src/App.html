@@ -147,6 +147,10 @@ svg{flex:none}
   border:1px solid var(--red);color:var(--red);background:#fff;
   font-size:13px;font-weight:650;white-space:nowrap}
 .mclear button:hover{background:var(--red-s)}
+#cCancelWrap{margin-top:8px}
+.btn.danger{width:100%;justify-content:center;border-color:#f3c9c9;color:var(--red);
+  background:#fff}
+.btn.danger:hover{background:var(--red-s);border-color:var(--red)}
 @media(max-width:620px){
   .fn{grid-template-columns:92px 1fr 42px;gap:8px}
   .fn__drop{display:none}
@@ -467,6 +471,11 @@ tbody tr:hover .more{background:var(--soft);color:var(--accent)}
           <button class="btn ghost" onclick="openModal('note')">Add a note</button>
           <button class="btn ghost" onclick="openModal('followup')">Follow-up</button>
           <button class="btn ghost" onclick="openModal('owner')">Take this lead</button>
+        </div>
+        <!-- Only rendered when a follow-up exists, so the row is not a dead
+             button most of the time. paintLead fills it. -->
+        <div id="cCancelWrap" class="hide">
+          <button class="btn danger" id="cCancel" onclick="clearFollow(event)">Cancel follow-up</button>
         </div>
         <div class="sec">Meta events sent</div>
         <div id="cEvents" style="display:flex;flex-wrap:wrap;gap:6px"></div>
@@ -1036,6 +1045,13 @@ function paintLead(){
   document.getElementById('cFacts').innerHTML = f.map(function(p){
     return '<dt>' + p[0] + '</dt><dd>' + (p[0] === 'Landing page' ? p[1] : esc(p[1])) + '</dd>';
   }).join('');
+
+  var cw = document.getElementById('cCancelWrap');
+  if (cw) {
+    cw.classList.toggle('hide', !l.nextAt);
+    if (l.nextAt) document.getElementById('cCancel').textContent =
+      'Cancel follow-up · ' + l.nextAt;
+  }
 
   document.getElementById('cStages').innerHTML = S.stages.map(function(s){
     return '<button class="' + (s.label.toLowerCase() === String(l.stage).toLowerCase() ? 'on' : '') +
