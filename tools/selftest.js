@@ -680,6 +680,53 @@ group('it shadows nothing in the original file');
   eq('and leaves the average empty', skew[0].avgMins, null);
 }
 
+{
+  group('it takes a lead off the follow-up list when the call is done');
+  const { G } = load();
+  const t = G.apiLogin('482913').token;
+  const soon = () => new Date(Date.now() + 36e5).toISOString();
+  const nextOf = id => G.crmLead(t, id).lead.nextAt;
+  const arm = id => G.crmFollowUp(t, id, soon(), 'ring back');
+
+  /* A call that connected: the promise was "ring them at this time" and it has
+     been kept, so the lead must leave the queue. Before this, logging a call
+     left the follow-up standing and the queue never drained — which is how the
+     Follow-ups tab filled up with people who had already been rung. */
+  arm('L001');
+  ok('the follow-up is set', !!nextOf('L001'));
+  G.crmLogCall(t, 'L001', 'answered', 'spoke to her');
+  eq('answering clears it', nextOf('L001'), '');
+
+  /* Not reached. Clearing here would drop them out of the queue and nobody
+     would ring again — the dangerous direction, so it is pinned. */
+  arm('L002');
+  G.crmLogCall(t, 'L002', 'noanswer', '');
+  ok('no answer leaves it standing', !!nextOf('L002'));
+
+  arm('L003');
+  G.crmLogCall(t, 'L003', 'busy', '');
+  ok('busy leaves it standing', !!nextOf('L003'));
+
+  /* Asked to call later keeps the old time, so it shows as overdue until a new
+     one is set. An overdue row is a better reminder than silence. */
+  arm('L001');
+  G.crmLogCall(t, 'L001', 'callback', '');
+  ok('asked-to-call-later leaves it standing', !!nextOf('L001'));
+
+  /* A wrong number is nobody to call back. */
+  arm('L003');
+  G.crmLogCall(t, 'L003', 'wrong', '');
+  eq('a wrong number clears it', nextOf('L003'), '');
+
+  /* and the manual route still works */
+  arm('L002');
+  G.crmFollowUp(t, 'L002', '', '');
+  eq('clearing by hand still works', nextOf('L002'), '');
+
+  const acts = G.crmLead(t, 'L001').activity.map(a => a.detail).join(' | ');
+  ok('the clearing is written to the activity log', acts.indexOf('Follow-up cleared') >= 0);
+}
+
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'Crm.gs'), 'utf8');
   const mine = (src.match(/^(?:function\s+([A-Za-z0-9_]+)|var\s+([A-Za-z0-9_]+))/gm) || [])
     .map(s => s.replace(/^(function|var)\s+/, ''));

@@ -45,12 +45,19 @@ var CRM_ACTIVITY_HEADERS = ['Time', 'Lead ID', 'Type', 'By', 'Detail'];
 
 /* Call outcomes. `key` is the STATUSES key the outcome implies — applied
    only when it moves the lead forward, never backward. */
+/* `clears` drops the follow-up once the call has served its purpose.
+   Answered and Wrong number are done with — the promise was kept, or there was
+   never anyone to keep it to. The three "did not reach" outcomes deliberately
+   leave the follow-up standing, because clearing it would drop the lead out of
+   the queue and nobody would ring them again. Asked to call later keeps it too,
+   so it shows as overdue until a new time is set — an overdue row is a better
+   reminder than silence. */
 var CRM_OUTCOMES = [
-  { key: 'answered', label: 'Answered',            status: 'contacted' },
+  { key: 'answered', label: 'Answered',            status: 'contacted', clears: true },
   { key: 'noanswer', label: 'No answer',           status: 'attempted' },
   { key: 'busy',     label: 'Busy / cut',          status: 'attempted' },
   { key: 'switched', label: 'Switched off',        status: 'attempted' },
-  { key: 'wrong',    label: 'Wrong number',        status: 'junk'      },
+  { key: 'wrong',    label: 'Wrong number',        status: 'junk',      clears: true },
   { key: 'callback', label: 'Asked to call later', status: 'contacted' }
 ];
 
@@ -492,6 +499,9 @@ function crmLogCall(token, leadId, outcomeKey, text) {
   crmAddActivity_(leadId, 'call', u.name, outcome.label + (text ? ' — ' + text : ''));
   log_('crm call', leadId + ' ' + outcome.label, u.name);
 
+  /* The follow-up said "ring them at this time". That has now happened. */
+  if (outcome.clears && l.nextAt) crmClearFollow_(leadId, u.name);
+
   /* Forward only: a missed call must not drag a Qualified lead back down the
      funnel. A wrong number is the exception — that is a fact, not progress. */
   var order = STATUSES.map(function (s) { return s.key; });
@@ -505,6 +515,18 @@ function crmLogCall(token, leadId, outcomeKey, text) {
   return { ok: true, stage: stage, activity: crmActivityFor_(leadId) };
 }
 
+/** Drops the follow-up off a lead. Shared by crmLogCall and crmFollowUp so the
+    two cannot drift apart. */
+function crmClearFollow_(leadId, who) {
+  var K = crmCols_(), sh = ss().getSheetByName(SH_LEADS);
+  var row = findRowById_(leadId);
+  if (!row || !K['Next action at']) return false;
+  sh.getRange(row, K['Next action at']).setValue('');
+  if (K['Next action note']) sh.getRange(row, K['Next action note']).setValue('');
+  crmAddActivity_(leadId, 'followup', who, 'Follow-up cleared');
+  return true;
+}
+
 function crmFollowUp(token, leadId, whenIso, text) {
   var u = session_(token);
   if (!u) return { ok: false, expired: true };
@@ -514,9 +536,7 @@ function crmFollowUp(token, leadId, whenIso, text) {
   if (!K['Next action at']) return { ok: false, error: 'Run crmSetup first' };
 
   if (!whenIso) {
-    sh.getRange(row, K['Next action at']).setValue('');
-    sh.getRange(row, K['Next action note']).setValue('');
-    crmAddActivity_(leadId, 'followup', u.name, 'Follow-up cleared');
+    crmClearFollow_(leadId, u.name);
     return { ok: true, nextAt: '', nextNote: '' };
   }
   var when = new Date(whenIso);
